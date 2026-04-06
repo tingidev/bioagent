@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import io
 import os
 import tempfile
 import zipfile
@@ -78,44 +77,50 @@ async def ingest(database_url: str = DATABASE_URL, data_path: Path | None = None
             tmp = Path(tempfile.mkdtemp())
             data_path = await download_dataset(tmp)
 
-        print(f"Reading {data_path}...")
-        text = data_path.read_text()
-        reader = csv.DictReader(io.StringIO(text))
+        print(f"Streaming from {data_path}...")
 
-        # Log actual columns for debugging
-        fieldnames = reader.fieldnames or []
-        print(f"CSV columns: {fieldnames}")
-
-        rows = []
-        for i, row in enumerate(reader):
-            # Map actual AlphaSeq columns to our schema
-            poi = row.get("POI") or f"seq_{i}"
-            hc = row.get("HC") or row.get("Sequence") or ""
-            lc = row.get("LC") or None
-            target = row.get("Target") or "SARS-CoV-2"
-            pred_affinity = row.get("Pred_affinity") or row.get("Binding_Score")
-
-            if not hc and not pred_affinity:
-                continue
-
-            score = float(pred_affinity) if pred_affinity else 0.0
-            lc = lc if lc else None
-
-            rows.append((poi, hc, lc, target, score, None))
-
-        print(f"Inserting {len(rows):,} rows...")
-
-        # Batch insert for performance
         batch_size = 5000
-        for start in range(0, len(rows), batch_size):
-            batch = rows[start : start + batch_size]
+        batch: list[tuple] = []
+        total_inserted = 0
+
+        with open(data_path, newline="") as f:
+            reader = csv.DictReader(f)
+            print(f"CSV columns: {reader.fieldnames}")
+
+            for i, row in enumerate(reader):
+                poi = row.get("POI") or f"seq_{i}"
+                hc = row.get("HC") or row.get("Sequence") or ""
+                lc = row.get("LC") or None
+                target = row.get("Target") or "SARS-CoV-2"
+                pred_affinity = row.get("Pred_affinity") or row.get("Binding_Score")
+
+                if not hc and not pred_affinity:
+                    continue
+
+                score = float(pred_affinity) if pred_affinity else 0.0
+                lc = lc if lc else None
+
+                batch.append((poi, hc, lc, target, score, None))
+
+                if len(batch) >= batch_size:
+                    await conn.executemany(
+                        "INSERT INTO alphaseq_bindings (sequence_id, vh_sequence, vl_sequence, target, binding_score, kd_nm) "
+                        "VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (sequence_id) DO NOTHING",
+                        batch,
+                    )
+                    total_inserted += len(batch)
+                    batch = []
+                    if total_inserted % 50000 == 0:
+                        print(f"  Inserted {total_inserted:,} rows...")
+
+        # Final batch
+        if batch:
             await conn.executemany(
                 "INSERT INTO alphaseq_bindings (sequence_id, vh_sequence, vl_sequence, target, binding_score, kd_nm) "
                 "VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (sequence_id) DO NOTHING",
                 batch,
             )
-            if (start + batch_size) % 50000 == 0 or start + batch_size >= len(rows):
-                print(f"  Inserted {min(start + batch_size, len(rows)):,} / {len(rows):,}")
+            total_inserted += len(batch)
 
         final_count = await conn.fetchval("SELECT COUNT(*) FROM alphaseq_bindings")
         print(f"Ingestion complete: {final_count:,} rows in alphaseq_bindings.")
