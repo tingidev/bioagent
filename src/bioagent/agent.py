@@ -1,0 +1,424 @@
+"""Agent orchestration — research → plan → execute → synthesize."""
+
+from __future__ import annotations
+
+import json
+import time
+from collections.abc import AsyncGenerator
+from typing import Any
+
+import anthropic
+import asyncpg
+
+from bioagent.data_map import build_data_map, describe_data_map
+from bioagent.models import AgentPhase, ToolCall, TraceEvent
+from bioagent.trace import (
+    add_step,
+    complete_investigation,
+    create_investigation,
+    error_event,
+    phase_event,
+    report_event,
+    step_to_event,
+    store_investigation,
+)
+from bioagent.tools import alphaseq, chembl, sabdab, statistics
+
+# Tool definitions for Claude
+TOOLS = [
+    {
+        "name": "query_alphaseq_bindings",
+        "description": (
+            "Search the AlphaSeq antibody binding dataset (104,972 antibodies). "
+            "Find antibodies by binding score range, sequence fragment, or get statistics. "
+            "Data includes VH/VL sequences, targets, and binding scores."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["search_by_score", "search_by_sequence", "get_statistics", "get_top_binders", "get_targets"],
+                    "description": "The query action to perform.",
+                },
+                "min_score": {"type": "number", "description": "Minimum binding score (for search_by_score)."},
+                "max_score": {"type": "number", "description": "Maximum binding score (for search_by_score)."},
+                "target": {"type": "string", "description": "Target name to filter by."},
+                "sequence_fragment": {"type": "string", "description": "Amino acid sequence fragment to search for."},
+                "limit": {"type": "integer", "description": "Max results to return (default 50)."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "query_sabdab",
+        "description": (
+            "Search the Structural Antibody Database (SAbDab, 18,744 structures). "
+            "Find antibody crystal structures by antigen, species, method, resolution, or PDB code."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["search_structures", "get_by_pdb", "search_by_antigen", "get_stats"],
+                    "description": "The query action to perform.",
+                },
+                "antigen_name": {"type": "string", "description": "Antigen name to search for."},
+                "pdb_code": {"type": "string", "description": "PDB code for direct lookup."},
+                "species": {"type": "string", "description": "Species filter (e.g., 'human', 'mouse')."},
+                "method": {"type": "string", "description": "Experimental method filter."},
+                "max_resolution": {"type": "number", "description": "Maximum resolution in Angstroms."},
+                "limit": {"type": "integer", "description": "Max results to return (default 50)."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "query_chembl",
+        "description": (
+            "Search the ChEMBL database (21.1M bioactivity measurements). "
+            "Find targets, molecules, bioactivities, and assay information. "
+            "Use this for drug discovery data, IC50/Ki/EC50 values, and target-compound relationships."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["search_target", "get_bioactivities", "get_molecule", "search_molecule", "get_assay"],
+                    "description": "The query action to perform.",
+                },
+                "query": {"type": "string", "description": "Search query (for search_target, search_molecule)."},
+                "target_chembl_id": {"type": "string", "description": "ChEMBL target ID (for get_bioactivities)."},
+                "molecule_chembl_id": {"type": "string", "description": "ChEMBL molecule ID (for get_molecule)."},
+                "assay_chembl_id": {"type": "string", "description": "ChEMBL assay ID (for get_assay)."},
+                "activity_type": {"type": "string", "description": "Filter by activity type (IC50, Ki, EC50, etc.)."},
+                "limit": {"type": "integer", "description": "Max results to return (default 50)."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "run_statistics",
+        "description": (
+            "Run statistical analysis on numeric data. Compute descriptive statistics, "
+            "compare groups, or build frequency tables."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["describe", "compare_groups", "frequency_table"],
+                    "description": "The analysis to perform.",
+                },
+                "values": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "description": "Numeric values for describe.",
+                },
+                "group_a": {"type": "array", "items": {"type": "number"}, "description": "First group for comparison."},
+                "group_b": {"type": "array", "items": {"type": "number"}, "description": "Second group for comparison."},
+                "label_a": {"type": "string", "description": "Label for first group."},
+                "label_b": {"type": "string", "description": "Label for second group."},
+                "categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Categorical values for frequency table.",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+]
+
+SYSTEM_PROMPT = """You are BioAgent, an investigator that reasons across scientific databases to answer research questions about antibodies, drug targets, and bioactivity.
+
+You have access to three connected data sources:
+
+{data_map}
+
+## How You Work
+
+You follow a structured investigation process:
+
+1. **RESEARCH**: Understand the question. Identify which data sources are relevant. Profile what data is available before diving in.
+2. **PLAN**: Describe your investigation strategy — which databases to query, in what order, and what you expect to find.
+3. **EXECUTE**: Run queries across databases. Cross-reference findings. Follow leads from one source to another.
+4. **SYNTHESIZE**: Produce a structured report with findings, citations to actual data, and reproducible queries.
+
+## Rules
+
+- Always start by profiling the data landscape before executing detailed queries.
+- Cross-reference across sources when possible — that's your unique value.
+- Every claim must cite specific data: sequence IDs, PDB codes, ChEMBL IDs, or binding scores.
+- State what you looked for and didn't find — negative results matter.
+- If a database is unreachable, note it and work with what's available.
+- Keep your reasoning visible — explain why you're querying each source.
+
+## Output Format
+
+When you've completed your investigation, write a structured report in markdown with:
+- **Question** — what was asked
+- **Approach** — what you investigated and why
+- **Findings** — organized by theme, with specific data citations
+- **Cross-Database Connections** — insights from combining sources
+- **Limitations** — what couldn't be answered and why
+- **Reproducibility** — key queries that can be re-run independently
+"""
+
+
+async def execute_tool(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    pool: asyncpg.Pool | None,
+) -> tuple[Any, str]:
+    """Execute a tool call and return (result, reproducible_query)."""
+    if tool_name == "query_alphaseq_bindings":
+        if pool is None:
+            return {"error": "AlphaSeq database not connected"}, "N/A"
+        action = tool_input["action"]
+        limit = tool_input.get("limit", 50)
+        target = tool_input.get("target")
+
+        if action == "search_by_score":
+            results, query = await alphaseq.search_by_binding_score(
+                pool, min_score=tool_input.get("min_score", 0.0),
+                max_score=tool_input.get("max_score"),
+                target=target, limit=limit,
+            )
+            return [r.model_dump() for r in results], query
+        elif action == "search_by_sequence":
+            results, query = await alphaseq.search_by_sequence(
+                pool, sequence_fragment=tool_input["sequence_fragment"], limit=limit,
+            )
+            return [r.model_dump() for r in results], query
+        elif action == "get_statistics":
+            return await alphaseq.get_binding_statistics(pool, target=target)
+        elif action == "get_top_binders":
+            results, query = await alphaseq.get_top_binders(pool, target=target, limit=limit)
+            return [r.model_dump() for r in results], query
+        elif action == "get_targets":
+            return await alphaseq.get_targets(pool)
+
+    elif tool_name == "query_sabdab":
+        action = tool_input["action"]
+        limit = tool_input.get("limit", 50)
+
+        if action == "search_structures":
+            results, query = await sabdab.search_structures(
+                antigen_name=tool_input.get("antigen_name"),
+                species=tool_input.get("species"),
+                method=tool_input.get("method"),
+                max_resolution=tool_input.get("max_resolution"),
+                limit=limit,
+            )
+            return [r.model_dump() for r in results], query
+        elif action == "get_by_pdb":
+            result, query = await sabdab.get_structure_by_pdb(tool_input["pdb_code"])
+            return result.model_dump() if result else None, query
+        elif action == "search_by_antigen":
+            results, query = await sabdab.search_by_antigen(
+                tool_input["antigen_name"], limit=limit,
+            )
+            return [r.model_dump() for r in results], query
+        elif action == "get_stats":
+            return await sabdab.get_summary_stats()
+
+    elif tool_name == "query_chembl":
+        action = tool_input["action"]
+        limit = tool_input.get("limit", 50)
+
+        if action == "search_target":
+            return await chembl.search_target(tool_input["query"], limit=limit)
+        elif action == "get_bioactivities":
+            results, query = await chembl.get_bioactivities_for_target(
+                tool_input["target_chembl_id"],
+                activity_type=tool_input.get("activity_type"),
+                limit=limit,
+            )
+            return [r.model_dump() for r in results], query
+        elif action == "get_molecule":
+            return await chembl.get_molecule(tool_input["molecule_chembl_id"])
+        elif action == "search_molecule":
+            return await chembl.search_molecule(tool_input["query"], limit=limit)
+        elif action == "get_assay":
+            return await chembl.get_assay(tool_input["assay_chembl_id"])
+
+    elif tool_name == "run_statistics":
+        action = tool_input["action"]
+        reproducible = f"statistics.{action}({json.dumps(tool_input)})"
+
+        if action == "describe":
+            return statistics.describe(tool_input.get("values", [])), reproducible
+        elif action == "compare_groups":
+            return statistics.compare_groups(
+                tool_input.get("group_a", []),
+                tool_input.get("group_b", []),
+                tool_input.get("label_a", "A"),
+                tool_input.get("label_b", "B"),
+            ), reproducible
+        elif action == "frequency_table":
+            return statistics.frequency_table(tool_input.get("categories", [])), reproducible
+
+    return {"error": f"Unknown tool/action: {tool_name}/{tool_input.get('action')}"}, "N/A"
+
+
+def _summarize_output(result: Any) -> str:
+    """Create a brief summary of tool output for the trace."""
+    if isinstance(result, list):
+        return f"Returned {len(result)} results"
+    if isinstance(result, dict):
+        if "error" in result:
+            return f"Error: {result['error']}"
+        if "total" in result or "count" in result:
+            return f"Stats: {json.dumps(result)}"
+        return f"Returned object with keys: {', '.join(result.keys())}"
+    return str(result)[:200]
+
+
+async def investigate(
+    question: str,
+    pool: asyncpg.Pool | None,
+    *,
+    model: str = "anthropic.claude-sonnet-4-20250514",
+    region: str = "eu-west-1",
+) -> AsyncGenerator[TraceEvent, None]:
+    """Run an investigation and yield trace events via SSE.
+
+    This is the core agent loop.
+    """
+    data_map = build_data_map()
+    investigation = create_investigation(question)
+
+    # Build system prompt with data map context
+    system = SYSTEM_PROMPT.format(data_map=describe_data_map(data_map))
+
+    # Initialize Bedrock client
+    client = anthropic.AnthropicBedrock(aws_region=region)
+
+    messages: list[dict] = [{"role": "user", "content": question}]
+    current_phase = AgentPhase.RESEARCH
+
+    yield phase_event(current_phase)
+
+    max_turns = 15
+    for turn in range(max_turns):
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=system,
+            tools=TOOLS,
+            messages=messages,
+        )
+
+        # Process response content blocks
+        assistant_content = []
+        for block in response.content:
+            if block.type == "text":
+                text = block.text
+                assistant_content.append({"type": "text", "text": text})
+
+                # Detect phase transitions from agent text
+                new_phase = _detect_phase(text)
+                if new_phase and new_phase != current_phase:
+                    current_phase = new_phase
+                    yield phase_event(current_phase)
+
+                # Add reasoning step to trace
+                investigation = add_step(
+                    investigation,
+                    phase=current_phase,
+                    description=f"Agent reasoning (turn {turn + 1})",
+                    reasoning=text[:500],
+                )
+                yield step_to_event(investigation.steps[-1])
+
+            elif block.type == "tool_use":
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+
+                # Execute the tool
+                start = time.monotonic()
+                try:
+                    result, reproducible_query = await execute_tool(block.name, block.input, pool)
+                except Exception as e:
+                    result = {"error": str(e)}
+                    reproducible_query = "N/A (error)"
+                duration_ms = int((time.monotonic() - start) * 1000)
+
+                tool_call = ToolCall(
+                    tool_name=block.name,
+                    input_params=block.input,
+                    output_summary=_summarize_output(result),
+                    raw_output=result if isinstance(result, (dict, list, str)) else str(result),
+                    duration_ms=duration_ms,
+                    reproducible_query=reproducible_query,
+                )
+
+                investigation = add_step(
+                    investigation,
+                    phase=current_phase,
+                    description=f"Tool call: {block.name}",
+                    reasoning=f"Calling {block.name} with {json.dumps(block.input)[:200]}",
+                    tool_call=tool_call,
+                )
+                yield step_to_event(investigation.steps[-1])
+
+                # Add tool result to messages
+                messages.append({"role": "assistant", "content": assistant_content})
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, default=str)[:10000],
+                    }],
+                })
+                assistant_content = []
+
+        # If no tool use, add assistant message and check if done
+        if response.stop_reason == "end_turn":
+            if assistant_content:
+                messages.append({"role": "assistant", "content": assistant_content})
+
+            # Extract report from last text block
+            report_text = ""
+            for block in response.content:
+                if block.type == "text":
+                    report_text = block.text
+
+            investigation = complete_investigation(investigation, report_text)
+            store_investigation(investigation)
+
+            yield phase_event(AgentPhase.SYNTHESIZE)
+            yield report_event(report_text)
+            return
+
+        # If we exhausted tool calls for this turn but aren't done, continue
+        if not assistant_content:
+            continue
+        if response.stop_reason != "tool_use":
+            messages.append({"role": "assistant", "content": assistant_content})
+
+    # Max turns reached
+    yield error_event("Investigation reached maximum number of turns. Partial results may be available.")
+    investigation = complete_investigation(investigation, "Investigation incomplete — max turns reached.")
+    store_investigation(investigation)
+
+
+def _detect_phase(text: str) -> AgentPhase | None:
+    """Detect phase transitions from agent text."""
+    text_lower = text.lower()[:200]
+    if any(w in text_lower for w in ["let me plan", "investigation strategy", "my plan", "i'll plan"]):
+        return AgentPhase.PLAN
+    if any(w in text_lower for w in ["let me query", "let me search", "executing", "i'll now query", "let me check"]):
+        return AgentPhase.EXECUTE
+    if any(w in text_lower for w in ["## findings", "## report", "synthesiz", "in summary", "## question"]):
+        return AgentPhase.SYNTHESIZE
+    return None
