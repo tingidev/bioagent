@@ -61,23 +61,23 @@ export default function HowItWorksPanel() {
         />
         <div className="bg-bio-card border border-bio-border rounded-xl p-6">
           <div className="flex items-center justify-center gap-2 text-sm">
-            <EntityNode label="Target" color="text-bio-accent" />
+            <EntityNode label="Target" color="text-rose-400" />
             <Arrow label="binds" />
             <EntityNode label="Antibody" color="text-blue-400" />
             <Arrow label="has structure" />
             <EntityNode label="Structure" color="text-purple-400" />
           </div>
           <div className="flex items-center justify-center gap-2 text-sm mt-4">
-            <EntityNode label="Target" color="text-bio-accent" />
+            <EntityNode label="Target" color="text-rose-400" />
             <Arrow label="tested against" />
-            <EntityNode label="Bioactivity" color="text-amber-400" />
+            <EntityNode label="Bioactivity" color="text-emerald-400" />
             <Arrow label="from assay" />
-            <EntityNode label="Assay" color="text-amber-400" />
+            <EntityNode label="Assay" color="text-sky-400" />
           </div>
           <div className="flex items-center justify-center gap-2 text-sm mt-4">
             <EntityNode label="Compound" color="text-amber-400" />
             <Arrow label="measured in" />
-            <EntityNode label="Bioactivity" color="text-amber-400" />
+            <EntityNode label="Bioactivity" color="text-emerald-400" />
           </div>
           <p className="text-xs text-bio-muted text-center mt-5">
             The agent uses this map to navigate between sources. A question about
@@ -167,31 +167,65 @@ export default function HowItWorksPanel() {
           title="Architecture"
           subtitle="Python/FastAPI backend, React frontend, real-time streaming."
         />
-        <div className="bg-bio-card border border-bio-border rounded-xl p-6 font-mono text-xs text-bio-muted">
-          <pre className="text-center leading-relaxed">
-{`┌─────────────────┐      SSE Stream       ┌──────────────────┐
-│                 │◄─────────────────────  │                  │
-│   React + TS    │                        │  FastAPI Server  │
-│   Live Trace    │─────────────────────►  │  /investigate    │
-│   Data Map      │   POST question        │  /map  /health   │
-│   Audit Trail   │                        │  /trace          │
-└─────────────────┘                        └────────┬─────────┘
-                                                    │
-                                           ┌────────┴─────────┐
-                                           │   Agent Loop     │
-                                           │   Claude (LLM)   │
-                                           │   Phase Mgmt     │
-                                           │   Trace Capture  │
-                                           └────────┬─────────┘
-                                                    │
-                        ┌───────────────────────────┼───────────────┐
-                        │                           │               │
-               ┌────────┴──────┐          ┌─────────┴─────┐  ┌─────┴──────┐
-               │   AlphaSeq   │          │    SAbDab     │  │   ChEMBL   │
-               │  PostgreSQL  │          │   REST API    │  │  REST API  │
-               │  104,972 ab  │          │  18,744 str   │  │  21.1M act │
-               └──────────────┘          └───────────────┘  └────────────┘`}
-          </pre>
+        <div className="space-y-4">
+          {/* Top row: Frontend ↔ API */}
+          <div className="flex items-stretch gap-0">
+            <ArchBox label="Frontend" accent>
+              <p>React + TypeScript</p>
+              <p>Live trace stream</p>
+              <p>Data map panel</p>
+              <p>Audit trail</p>
+            </ArchBox>
+            <ArchArrow label="SSE Stream" biDirectional />
+            <ArchBox label="FastAPI Server" accent>
+              <p>/investigate (SSE)</p>
+              <p>/map</p>
+              <p>/health</p>
+              <p>/trace/&#123;id&#125;</p>
+            </ArchBox>
+          </div>
+
+          {/* Down arrow */}
+          <div className="flex justify-center">
+            <ArchArrowDown />
+          </div>
+
+          {/* Agent box */}
+          <div className="flex justify-center">
+            <div className="rounded-lg border border-bio-accent/30 bg-bio-bg px-6 py-3 text-center">
+              <span className="text-xs font-medium uppercase tracking-wider text-bio-accent">
+                Agent Loop
+              </span>
+              <div className="mt-1 space-y-0.5 text-xs text-bio-muted">
+                <p>Claude (LLM) via Bedrock</p>
+                <p>Phase management</p>
+                <p>Trace capture</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Down arrow */}
+          <div className="flex justify-center">
+            <ArchArrowDown />
+          </div>
+
+          {/* Bottom row: 3 data sources */}
+          <div className="flex items-stretch gap-0">
+            <ArchBox label="AlphaSeq" color="text-blue-400" borderColor="border-blue-400/30">
+              <p>PostgreSQL</p>
+              <p>104,972 antibodies</p>
+            </ArchBox>
+            <ArchSpacer />
+            <ArchBox label="SAbDab" color="text-purple-400" borderColor="border-purple-400/30">
+              <p>REST API</p>
+              <p>18,744 structures</p>
+            </ArchBox>
+            <ArchSpacer />
+            <ArchBox label="ChEMBL" color="text-amber-400" borderColor="border-amber-400/30">
+              <p>REST API</p>
+              <p>21.1M activities</p>
+            </ArchBox>
+          </div>
         </div>
       </section>
 
@@ -271,20 +305,63 @@ function SourceCard({
       </div>
       <p className="text-2xl font-bold text-gray-100">{records}</p>
       <p className="text-xs text-bio-muted leading-relaxed">{description}</p>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-1.5">
         {entities.map((e) => (
           <span
             key={e}
-            className="text-[10px] px-1.5 py-0.5 rounded bg-bio-bg text-bio-muted"
+            className="text-[10px] px-2 py-0.5 rounded border border-bio-border text-gray-300"
           >
             {e}
           </span>
         ))}
       </div>
-      <div className="bg-bio-bg rounded p-2">
-        <code className="text-[10px] text-bio-muted break-all">{queryExample}</code>
+      <div className="bg-bio-bg rounded p-2.5">
+        <code className="text-[10px] break-all">
+          <QueryHighlight query={queryExample} />
+        </code>
       </div>
     </div>
+  );
+}
+
+function QueryHighlight({ query }: { query: string }) {
+  // SQL
+  if (query.startsWith("SELECT")) {
+    return highlightSql(query);
+  }
+  // REST
+  if (query.startsWith("GET")) {
+    return highlightRest(query);
+  }
+  return <span className="text-bio-muted">{query}</span>;
+}
+
+function highlightSql(query: string) {
+  const kw = new Set(["SELECT", "FROM", "WHERE", "ORDER", "BY", "GROUP", "LIMIT", "AND", "OR", "AS", "COUNT", "AVG", "STDDEV", "MIN", "MAX", "DESC", "ASC"]);
+  const tokens = query.split(/(\s+|\b)/);
+  return (
+    <>
+      {tokens.map((tok, i) =>
+        kw.has(tok) ? (
+          <span key={i} className="text-gray-300 font-medium">{tok}</span>
+        ) : (
+          <span key={i} className="text-bio-muted">{tok}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+function highlightRest(query: string) {
+  const match = query.match(/^(GET)\s+(.+?)(\?.+)?$/);
+  if (!match) return <span className="text-bio-muted">{query}</span>;
+  const [, method, path, params] = match;
+  return (
+    <>
+      <span className="text-gray-300 font-medium">{method}</span>
+      <span className="text-bio-muted"> {path}</span>
+      {params && <span className="text-gray-500">{params}</span>}
+    </>
   );
 }
 
@@ -299,9 +376,9 @@ function EntityNode({ label, color }: { label: string; color: string }) {
 function Arrow({ label }: { label: string }) {
   return (
     <span className="text-bio-muted flex items-center gap-1">
-      <span className="text-bio-border">---[</span>
-      <span className="text-bio-accent text-[10px]">{label}</span>
-      <span className="text-bio-border">]---&gt;</span>
+      <span className="text-gray-600">---[</span>
+      <span className="text-gray-500 text-[10px]">{label}</span>
+      <span className="text-gray-600">]---&gt;</span>
     </span>
   );
 }
@@ -335,6 +412,62 @@ function PhaseCard({
   );
 }
 
+function ArchBox({
+  label,
+  children,
+  accent,
+  color,
+  borderColor,
+}: {
+  label: string;
+  children: React.ReactNode;
+  accent?: boolean;
+  color?: string;
+  borderColor?: string;
+}) {
+  return (
+    <div
+      className={`flex-1 rounded-lg border ${borderColor ?? "border-bio-border"} bg-bio-bg px-4 py-3`}
+    >
+      <span
+        className={`text-xs font-medium uppercase tracking-wider ${
+          accent ? "text-bio-accent" : color ?? "text-gray-300"
+        }`}
+      >
+        {label}
+      </span>
+      <div className="mt-1 space-y-0.5 text-xs text-bio-muted">{children}</div>
+    </div>
+  );
+}
+
+function ArchArrow({ label, biDirectional }: { label: string; biDirectional?: boolean }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-3 gap-0.5">
+      <svg width="80" height="16" viewBox="0 0 80 16" fill="none" className="text-bio-border">
+        {biDirectional && (
+          <path d="M13 8H3m0 0l3-3m-3 3l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+        <path d="M67 8h10m0 0l-3-3m3 3l-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <line x1={biDirectional ? "13" : "3"} y1="8" x2="67" y2="8" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+      <span className="text-[10px] text-bio-muted">{label}</span>
+    </div>
+  );
+}
+
+function ArchArrowDown() {
+  return (
+    <svg width="16" height="28" viewBox="0 0 16 28" fill="none" className="text-bio-border">
+      <path d="M8 3v22m0 0l-3-3m3 3l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ArchSpacer() {
+  return <div className="w-3" />;
+}
+
 function TraceExample({
   step,
   phase,
@@ -353,7 +486,7 @@ function TraceExample({
   return (
     <div className="flex items-start gap-3 text-xs font-mono">
       <span className="text-bio-accent w-4 text-right shrink-0">{step}.</span>
-      <span className="text-bio-muted w-14 shrink-0">[{phase}]</span>
+      <span className="text-bio-muted w-20 shrink-0">[{phase}]</span>
       <div className="flex-1">
         <div className="flex items-center gap-2">
           <span className="text-gray-300">{action}</span>
