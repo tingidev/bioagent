@@ -46,6 +46,7 @@ export interface TraceEvent {
     tool_call?: ToolCallTrace;
     report?: string;
     message?: string;
+    turn?: number;
   };
 }
 

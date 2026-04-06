@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
+from functools import partial
 from typing import Any
 
 import anthropic
@@ -21,6 +23,7 @@ from bioagent.trace import (
     report_event,
     step_to_event,
     store_investigation,
+    thinking_event,
 )
 from bioagent.tools import alphaseq, chembl, sabdab, statistics
 
@@ -322,13 +325,19 @@ async def investigate(
 
     max_turns = 15
     for turn in range(max_turns):
+        yield thinking_event(turn + 1)
         try:
-            response = client.messages.create(
-                model=model,
-                max_tokens=4096,
-                system=system,
-                tools=TOOLS,
-                messages=messages,
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                partial(
+                    client.messages.create,
+                    model=model,
+                    max_tokens=4096,
+                    system=system,
+                    tools=TOOLS,
+                    messages=messages,
+                ),
             )
         except anthropic.AuthenticationError:
             yield error_event("API authentication failed. The API key may be invalid or expired.")

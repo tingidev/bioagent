@@ -89,6 +89,11 @@ def report_event(report: str) -> TraceEvent:
     return TraceEvent(event_type="report", data={"report": report})
 
 
+def thinking_event(turn: int) -> TraceEvent:
+    """Create a thinking event — tells the frontend the LLM is processing."""
+    return TraceEvent(event_type="thinking", data={"turn": turn})
+
+
 def error_event(message: str) -> TraceEvent:
     """Create an error event."""
     return TraceEvent(event_type="error", data={"message": message})
