@@ -282,8 +282,8 @@ async def investigate(
     question: str,
     pool: asyncpg.Pool | None,
     *,
-    model: str = "anthropic.claude-sonnet-4-20250514",
-    region: str = "eu-west-1",
+    model: str = "us.anthropic.claude-sonnet-4-20250514-v1:0",
+    region: str = "us-east-1",
 ) -> AsyncGenerator[TraceEvent, None]:
     """Run an investigation and yield trace events via SSE.
 
@@ -295,7 +295,7 @@ async def investigate(
     # Build system prompt with data map context
     system = SYSTEM_PROMPT.format(data_map=describe_data_map(data_map))
 
-    # Initialize Bedrock client
+    # Initialize Bedrock client — uses AWS env vars from assume
     client = anthropic.AnthropicBedrock(aws_region=region)
 
     messages: list[dict] = [{"role": "user", "content": question}]

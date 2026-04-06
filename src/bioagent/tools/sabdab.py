@@ -17,7 +17,7 @@ SEARCH_URL = f"{BASE_URL}/search/"
 async def check_connectivity() -> bool:
     """Check if SAbDab API is reachable."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             resp = await client.get(f"{BASE_URL}/about/")
             return resp.status_code == 200
     except Exception:
@@ -54,7 +54,7 @@ async def search_structures(
     url = f"{BASE_URL}/search/?"
     reproducible = f"GET {url} params={params}"
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         resp = await client.get(url, params=params)
         resp.raise_for_status()
 
@@ -79,7 +79,7 @@ async def get_structure_by_pdb(pdb_code: str) -> tuple[AntibodyStructure | None,
     url = f"{BASE_URL}/search/?pdb={pdb_code}&output=json"
     reproducible = f"GET {url}"
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
         resp = await client.get(url)
         resp.raise_for_status()
 
@@ -104,7 +104,7 @@ async def get_summary_stats() -> tuple[dict, str]:
     url = f"{BASE_URL}/about/"
     reproducible = f"GET {url}"
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
         resp = await client.get(f"{BASE_URL}/stats/?output=json")
 
     try:
