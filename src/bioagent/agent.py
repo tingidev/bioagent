@@ -612,7 +612,7 @@ async def _run_tool_phase(
                     state.investigation,
                     phase=phase,
                     description=f"Agent reasoning (turn {turn + 1})",
-                    reasoning=block.text[:500],
+                    reasoning=block.text,
                 )
                 yield step_to_event(state.investigation.steps[-1])
 
