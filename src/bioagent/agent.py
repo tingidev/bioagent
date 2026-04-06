@@ -322,13 +322,36 @@ async def investigate(
 
     max_turns = 15
     for turn in range(max_turns):
-        response = client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=system,
-            tools=TOOLS,
-            messages=messages,
-        )
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=4096,
+                system=system,
+                tools=TOOLS,
+                messages=messages,
+            )
+        except anthropic.AuthenticationError:
+            yield error_event("API authentication failed. The API key may be invalid or expired.")
+            return
+        except anthropic.RateLimitError:
+            yield error_event("Rate limit reached. Please wait a moment and try again.")
+            return
+        except anthropic.BadRequestError as e:
+            yield error_event(f"Invalid request to the AI model: {e.message}")
+            return
+        except anthropic.APIStatusError as e:
+            # Catch billing/credits errors and other status errors
+            msg = e.message if hasattr(e, "message") else str(e)
+            if "credit" in msg.lower() or "billing" in msg.lower():
+                yield error_event("The AI service has insufficient credits. The site administrator has been notified.")
+            elif "overloaded" in msg.lower():
+                yield error_event("The AI model is currently overloaded. Please try again in a few minutes.")
+            else:
+                yield error_event(f"AI service error ({e.status_code}): {msg}")
+            return
+        except anthropic.APIConnectionError:
+            yield error_event("Could not connect to the AI service. Please try again later.")
+            return
 
         # Process response content blocks
         assistant_content = []

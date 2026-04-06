@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -86,10 +85,18 @@ async def data_map():
 async def start_investigation(request: InvestigationRequest):
     """Start an investigation — streams trace events via SSE."""
     async def event_stream() -> AsyncGenerator[dict, None]:
-        async for event in investigate(request.question, _pool, api_key=request.api_key):
+        try:
+            async for event in investigate(request.question, _pool, api_key=request.api_key):
+                yield {
+                    "event": event.event_type,
+                    "data": event.model_dump_json(),
+                }
+        except Exception as e:
+            from bioagent.trace import error_event
+            err = error_event(f"Unexpected error: {type(e).__name__}")
             yield {
-                "event": event.event_type,
-                "data": event.model_dump_json(),
+                "event": err.event_type,
+                "data": err.model_dump_json(),
             }
 
     return EventSourceResponse(event_stream())
