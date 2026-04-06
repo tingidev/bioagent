@@ -205,7 +205,7 @@ export default function App() {
                 steps={steps}
                 error={error}
               />
-              {report && <ReportPanel report={report} />}
+              {report && <ReportPanel report={report} steps={steps} question={question} />}
             </main>
 
             {/* Right sidebar — Audit Trail */}

@@ -1,11 +1,14 @@
 import Markdown from "./Markdown";
 import { exportMarkdown, exportDocx } from "../exportReport";
+import type { TraceStep } from "../types";
 
 interface Props {
   report: string;
+  steps: TraceStep[];
+  question: string;
 }
 
-export default function ReportPanel({ report }: Props) {
+export default function ReportPanel({ report, steps, question }: Props) {
   return (
     <div className="border-t-2 border-phase-synthesize/30 bg-gradient-to-b from-phase-synthesize/[0.03] to-transparent">
       <div className="p-6">
@@ -25,8 +28,8 @@ export default function ReportPanel({ report }: Props) {
             </p>
           </div>
           <div className="flex items-center gap-1.5">
-            <ExportButton label=".md" onClick={() => exportMarkdown(report)} />
-            <ExportButton label=".docx" onClick={() => exportDocx(report)} />
+            <ExportButton label=".md" onClick={() => exportMarkdown(report, steps, question)} />
+            <ExportButton label=".docx" onClick={() => exportDocx(report, steps, question)} />
           </div>
         </div>
 
