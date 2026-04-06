@@ -460,7 +460,7 @@ def _compact_record(record: dict) -> dict:
     return {k: _truncate_value(v) for k, v in record.items()}
 
 
-def _compact_for_context(result: Any, max_items: int = 10) -> str:
+def _compact_for_context(result: Any, max_items: int = 20) -> str:
     """Create a compact JSON representation of tool results for the LLM context.
 
     Full results are kept in the audit trail (ToolCall.raw_output).
@@ -480,6 +480,58 @@ def _compact_for_context(result: Any, max_items: int = 10) -> str:
     if len(text) > 4000:
         return text[:3900] + f'\n... [truncated, {len(text)} chars total]'
     return text
+
+
+def _trim_messages(messages: list[dict], keep_recent: int = 6) -> list[dict]:
+    """Compress older tool exchanges to keep context from growing unbounded.
+
+    Keeps the first message (original question) and the last *keep_recent*
+    messages intact. Older assistant reasoning is trimmed and older
+    tool_result contents are replaced with a one-line summary.
+    """
+    # +1 for the initial user question at index 0
+    if len(messages) <= keep_recent + 1:
+        return messages
+
+    boundary = len(messages) - keep_recent
+    trimmed = [messages[0]]
+
+    for i, msg in enumerate(messages[1:], 1):
+        if i >= boundary:
+            trimmed.append(msg)
+            continue
+
+        if msg["role"] == "user":
+            content = msg.get("content", [])
+            if isinstance(content, list) and content and isinstance(content[0], dict) and content[0].get("type") == "tool_result":
+                old_text = content[0].get("content", "")
+                trimmed.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": content[0]["tool_use_id"],
+                        "content": old_text[:300] + ("..." if len(old_text) > 300 else ""),
+                    }],
+                })
+            else:
+                trimmed.append(msg)
+
+        elif msg["role"] == "assistant":
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                compressed = []
+                for block in content:
+                    if block.get("type") == "text" and len(block.get("text", "")) > 300:
+                        compressed.append({"type": "text", "text": block["text"][:300] + "..."})
+                    else:
+                        compressed.append(block)
+                trimmed.append({"role": "assistant", "content": compressed})
+            else:
+                trimmed.append(msg)
+        else:
+            trimmed.append(msg)
+
+    return trimmed
 
 
 # ---------------------------------------------------------------------------
@@ -622,7 +674,7 @@ async def _run_tool_phase(
             )
 
         try:
-            response = await _call_llm(client, model, system=system, messages=messages, tools=TOOLS, on_retry=_on_retry)
+            response = await _call_llm(client, model, system=system, messages=_trim_messages(messages), tools=TOOLS, on_retry=_on_retry)
         except Exception as e:
             err = _handle_api_error(e)
             if err:
