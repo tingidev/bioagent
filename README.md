@@ -2,9 +2,11 @@
 
 Agentic investigator that reasons across scientific databases to answer research questions about antibodies, drug targets, and bioactivity.
 
+**Live at [bioagent.eu](https://bioagent.eu)**
+
 ## What It Does
 
-BioAgent connects to three real scientific data sources and navigates them autonomously:
+BioAgent connects to three real scientific data sources and investigates them autonomously:
 
 | Source | Type | Scale |
 |--------|------|-------|
@@ -12,13 +14,32 @@ BioAgent connects to three real scientific data sources and navigates them auton
 | **SAbDab** | REST API | 18,744 antibody crystal structures |
 | **ChEMBL 35** | REST API | 21.1M bioactivity measurements |
 
-The agent builds a **data map** of connected sources, takes a research question, plans an investigation strategy, executes queries across databases, and produces a structured report — with every step traced and every finding reproducible.
+Given a research question, four specialised agents work in sequence — each with a focused role, structured handoffs, and full traceability.
 
 ## How It Works
 
-1. **Data Map** — The agent knows what each source contains, what entities exist, and how they relate. This map is visible in the UI and constrains the agent's reasoning.
-2. **Investigation Loop** — Research → Plan → Execute → Synthesize. Each phase is visible in real time.
-3. **Audit Trail** — Every API call, every SQL query, every reasoning step is logged. Every finding includes the exact query that produced it.
+BioAgent uses the **RPES methodology** (Research, Plan, Execute, Synthesise), implemented as four independent agents with handoffs between each phase:
+
+| Phase | Agent | Tools | Purpose |
+|-------|-------|-------|---------|
+| **Research** | Research Agent | Yes | Explore the data landscape — record counts, targets, connectivity |
+| **Plan** | Plan Agent | No | Design investigation strategy with hypothesis and query sequence |
+| **Execute** | Execute Agent | Yes | Run queries, cross-reference across databases, statistical analysis |
+| **Synthesise** | Synthesis Agent | No | Produce structured report with citations and reproducible queries |
+
+Phase transitions are architectural, not keyword-detected. Each agent receives the previous phase's output as structured context.
+
+### Cross-Database Reasoning
+
+The three databases share no common identifiers. Cross-referencing works through shared biology: AlphaSeq binding targets map to SAbDab antigen searches and ChEMBL target queries. The agent bridges sources through domain knowledge, not ID joins.
+
+### Analytical Tools
+
+The execute agent has access to statistical analysis: correlation, outlier detection, group comparison with effect size, ranking, cross-tabulation, and descriptive statistics. Every analytical claim is backed by a specific result.
+
+### Audit Trail
+
+Every tool call is logged with the exact query (SQL or API request), input parameters, output summary, and execution time. Findings are reproducible — any step can be re-run independently.
 
 ## Quick Start
 
@@ -51,12 +72,12 @@ PYTHONPATH=src uvicorn bioagent.api:app --reload --port 8000
 cd web && npm install && npm run dev
 ```
 
-> **LLM Provider:** The agent uses Claude Sonnet 4. Set `ANTHROPIC_API_KEY` for the direct API (recommended), or provide AWS credentials for Bedrock as an alternative.
+> **LLM Provider:** Uses Claude Sonnet 4 via the Anthropic API (recommended). Set `ANTHROPIC_API_KEY`, or provide AWS credentials for Bedrock as a fallback.
 
 ## Tech Stack
 
 - **Backend:** Python, FastAPI, asyncpg, httpx
-- **Agent:** Claude via AWS Bedrock
+- **Agent:** Claude Sonnet 4 via Anthropic API
 - **Database:** PostgreSQL 16
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS
 - **Deployment:** Docker Compose
@@ -64,24 +85,27 @@ cd web && npm install && npm run dev
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│   React UI  │────▶│  FastAPI SSE  │────▶│  Agent Loop  │
-│  Live Trace │◀────│  /investigate │◀────│  Claude LLM  │
-└─────────────┘     └──────────────┘     └──────┬───────┘
-                                                │
-                    ┌───────────────┬────────────┼────────────┐
-                    ▼               ▼            ▼            ▼
-              ┌──────────┐   ┌──────────┐  ┌──────────┐ ┌──────────┐
-              │ AlphaSeq │   │  SAbDab  │  │  ChEMBL  │ │Statistics│
-              │ Postgres │   │ REST API │  │ REST API │ │  Local   │
-              └──────────┘   └──────────┘  └──────────┘ └──────────┘
+┌─────────────┐     ┌──────────────┐     ┌──────────────────────────────┐
+│   React UI  │────▶│  FastAPI SSE  │────▶│  RPES Agent Orchestrator     │
+│  Live Trace │◀────│  /investigate │◀────│                              │
+└─────────────┘     └──────────────┘     │  Research ─▶ Plan ─▶ Execute │
+                                         │      ▼                  │    │
+                                         │  Synthesise ◀───────────┘    │
+                                         └──────────────┬───────────────┘
+                                                        │
+                    ┌───────────────┬────────────────────┼────────────┐
+                    ▼               ▼                    ▼            ▼
+              ┌──────────┐   ┌──────────┐         ┌──────────┐ ┌──────────┐
+              │ AlphaSeq │   │  SAbDab  │         │  ChEMBL  │ │Statistics│
+              │ Postgres │   │ REST API │         │ REST API │ │  Local   │
+              └──────────┘   └──────────┘         └──────────┘ └──────────┘
 ```
 
 ## API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | System status + data source connectivity |
+| `/health` | GET | System status and data source connectivity |
 | `/map` | GET | Full data map: sources, entities, relationships |
 | `/investigate` | POST | Start investigation (SSE stream of trace events) |
 | `/trace/{id}` | GET | Full audit trail for a completed investigation |
