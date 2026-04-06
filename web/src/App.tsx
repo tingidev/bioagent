@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DataMapResponse, HealthResponse, TraceEvent, TraceStep } from "./types";
 import { fetchDataMap, fetchHealth, subscribeInvestigation } from "./api";
 import { PHASE_META, type Phase } from "./phaseConfig";
@@ -22,6 +22,7 @@ export default function App() {
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
+  const cancelRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     fetchHealth().then(setHealth).catch(() => setHealth(null));
@@ -29,15 +30,21 @@ export default function App() {
   }, []);
 
 
+  const handleCancel = useCallback(() => {
+    cancelRef.current?.();
+    cancelRef.current = null;
+    setIsInvestigating(false);
+    setIsThinking(false);
+  }, []);
+
   const handleReset = useCallback(() => {
+    handleCancel();
     setQuestion("");
     setSteps([]);
     setReport(null);
     setError(null);
     setCurrentPhase(null);
-    setIsInvestigating(false);
-    setIsThinking(false);
-  }, []);
+  }, [handleCancel]);
 
   const handleInvestigate = useCallback(() => {
     if (!question.trim() || isInvestigating) return;
@@ -49,7 +56,7 @@ export default function App() {
     setCurrentPhase("research");
 
 
-    subscribeInvestigation(
+    const cancel = subscribeInvestigation(
       question,
       (event: TraceEvent) => {
         if (event.event_type === "thinking") {
@@ -82,6 +89,7 @@ export default function App() {
       },
       () => setIsInvestigating(false),
     );
+    cancelRef.current = cancel;
   }, [question, isInvestigating]);
 
   const sourceCount = health
@@ -140,9 +148,17 @@ export default function App() {
             </div>
           )}
           {currentPhase && isInvestigating && (
-            <span className={`animate-pulse uppercase text-xs tracking-wider ${PHASE_META[currentPhase as Phase]?.color ?? "text-bio-accent"}`}>
-              {currentPhase}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className={`animate-pulse uppercase text-xs tracking-wider ${PHASE_META[currentPhase as Phase]?.color ?? "text-bio-accent"}`}>
+                {currentPhase}
+              </span>
+              <button
+                onClick={handleCancel}
+                className="text-xs text-red-400/70 hover:text-red-400 px-2 py-0.5 rounded border border-red-400/20 hover:border-red-400/40 transition-colors"
+              >
+                Stop
+              </button>
+            </div>
           )}
           {(steps.length > 0 || report) && !isInvestigating && (
             <button

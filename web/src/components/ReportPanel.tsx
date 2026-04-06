@@ -1,4 +1,5 @@
 import Markdown from "./Markdown";
+import { exportMarkdown, exportDocx } from "../exportReport";
 
 interface Props {
   report: string;
@@ -15,13 +16,17 @@ export default function ReportPanel({ report }: Props) {
               <path d="M2 3h12M2 7h8M2 11h10M2 15h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="text-sm font-semibold text-gray-200 uppercase tracking-wider">
               Investigation Findings
             </h3>
             <p className="text-[10px] text-bio-muted mt-0.5">
               Structured report with citations and reproducible queries
             </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ExportButton label=".md" onClick={() => exportMarkdown(report)} />
+            <ExportButton label=".docx" onClick={() => exportDocx(report)} />
           </div>
         </div>
 
@@ -31,5 +36,16 @@ export default function ReportPanel({ report }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function ExportButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="text-[10px] text-bio-muted hover:text-gray-300 px-2 py-1 rounded border border-bio-border hover:border-bio-muted/50 transition-colors"
+    >
+      {label}
+    </button>
   );
 }
