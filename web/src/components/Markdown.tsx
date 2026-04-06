@@ -4,36 +4,47 @@ import remarkGfm from "remark-gfm";
 interface Props {
   children: string;
   className?: string;
+  compact?: boolean;
 }
 
 /** Reusable markdown renderer with dark-theme styling. */
-export default function Markdown({ children, className = "" }: Props) {
+export default function Markdown({ children, className = "", compact = false }: Props) {
+  const text = compact ? "text-[11px]" : "text-sm";
+  const heading1 = compact ? "text-xs" : "text-lg";
+  const heading2 = compact ? "text-[11px]" : "text-base";
+  const heading3 = compact ? "text-[11px]" : "text-sm";
+  const codeSize = compact ? "text-[10px]" : "text-xs";
+  const spacing = compact ? "mb-1" : "mb-2";
+  const mt1 = compact ? "mt-2" : "mt-5";
+  const mt2 = compact ? "mt-1.5" : "mt-4";
+  const mt3 = compact ? "mt-1" : "mt-3";
+
   return (
     <div className={className}>
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
         h1: ({ children }) => (
-          <h1 className="text-lg font-bold text-gray-100 mt-5 mb-2 pb-1 border-b border-bio-border">
+          <h1 className={`${heading1} font-bold text-gray-100 ${mt1} ${spacing} pb-1 border-b border-bio-border`}>
             {children}
           </h1>
         ),
         h2: ({ children }) => (
-          <h2 className="text-base font-semibold text-gray-200 mt-4 mb-2 pb-1 border-b border-bio-border/50">
+          <h2 className={`${heading2} font-semibold text-gray-200 ${mt2} ${spacing} pb-1 border-b border-bio-border/50`}>
             {children}
           </h2>
         ),
         h3: ({ children }) => (
-          <h3 className="text-sm font-semibold text-gray-200 mt-3 mb-1">{children}</h3>
+          <h3 className={`${heading3} font-semibold text-gray-200 ${mt3} mb-0.5`}>{children}</h3>
         ),
         p: ({ children }) => (
-          <p className="text-sm text-gray-300 leading-relaxed mb-2">{children}</p>
+          <p className={`${text} text-gray-300 leading-relaxed ${spacing}`}>{children}</p>
         ),
         ul: ({ children }) => (
-          <ul className="text-sm text-gray-300 list-disc pl-5 mb-2 space-y-0.5">{children}</ul>
+          <ul className={`${text} text-gray-300 list-disc pl-5 ${spacing} space-y-0.5`}>{children}</ul>
         ),
         ol: ({ children }) => (
-          <ol className="text-sm text-gray-300 list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>
+          <ol className={`${text} text-gray-300 list-decimal pl-5 ${spacing} space-y-0.5`}>{children}</ol>
         ),
         li: ({ children }) => (
           <li className="leading-relaxed">{children}</li>
@@ -49,7 +60,7 @@ export default function Markdown({ children, className = "" }: Props) {
           if (isBlock) {
             return (
               <code
-                className="block bg-bio-bg border border-bio-border rounded-lg p-3 text-xs font-mono text-gray-300 overflow-x-auto my-2"
+                className={`block bg-bio-bg border border-bio-border rounded-lg p-3 ${codeSize} font-mono text-gray-300 overflow-x-auto my-2`}
                 {...props}
               >
                 {children}
@@ -57,7 +68,7 @@ export default function Markdown({ children, className = "" }: Props) {
             );
           }
           return (
-            <code className="px-1.5 py-0.5 rounded bg-bio-border/60 text-bio-accent text-xs font-mono" {...props}>
+            <code className={`px-1.5 py-0.5 rounded bg-bio-border/60 text-bio-accent ${codeSize} font-mono`} {...props}>
               {children}
             </code>
           );
@@ -65,7 +76,7 @@ export default function Markdown({ children, className = "" }: Props) {
         pre: ({ children }) => <pre className="my-2">{children}</pre>,
         table: ({ children }) => (
           <div className="overflow-x-auto my-3">
-            <table className="w-full text-xs border-collapse">{children}</table>
+            <table className={`w-full ${codeSize} border-collapse`}>{children}</table>
           </div>
         ),
         thead: ({ children }) => (

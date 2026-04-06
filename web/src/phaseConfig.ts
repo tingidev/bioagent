@@ -6,28 +6,28 @@ export const PHASE_META: Record<
   { label: string; shortLabel: string; color: string; bg: string; border: string }
 > = {
   research: {
-    label: "Researching",
+    label: "Research Agent",
     shortLabel: "R",
     color: "text-phase-research",
     bg: "bg-phase-research",
     border: "border-phase-research",
   },
   plan: {
-    label: "Planning",
+    label: "Plan Agent",
     shortLabel: "P",
     color: "text-phase-plan",
     bg: "bg-phase-plan",
     border: "border-phase-plan",
   },
   execute: {
-    label: "Executing",
+    label: "Execute Agent",
     shortLabel: "E",
     color: "text-phase-execute",
     bg: "bg-phase-execute",
     border: "border-phase-execute",
   },
   synthesize: {
-    label: "Synthesizing",
+    label: "Synthesis Agent",
     shortLabel: "S",
     color: "text-phase-synthesize",
     bg: "bg-phase-synthesize",

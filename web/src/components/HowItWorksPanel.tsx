@@ -161,6 +161,30 @@ export default function HowItWorksPanel() {
         </div>
       </section>
 
+      {/* GxP Design */}
+      <section className="space-y-4">
+        <SectionHeader
+          title="Designed for GxP Environments"
+          subtitle="Patterns from pharmaceutical manufacturing AI, applied to autonomous investigation."
+        />
+        <div className="bg-bio-card border border-bio-border rounded-xl p-6 space-y-4">
+          <div className="grid grid-cols-3 gap-4">
+            <ComplianceCard
+              title="Reproducible Queries"
+              description="Every tool call records the exact SQL or API request used. Any finding can be independently verified by re-running the same query."
+            />
+            <ComplianceCard
+              title="Phase Separation"
+              description="Four independent agents handle Research, Plan, Execute, and Synthesis. Each phase's reasoning is isolated and separately reviewable."
+            />
+            <ComplianceCard
+              title="Source Attribution"
+              description="Findings cite specific identifiers: sequence IDs, PDB codes, ChEMBL IDs, and binding scores. No unsourced claims."
+            />
+          </div>
+        </div>
+      </section>
+
       {/* Architecture */}
       <section className="space-y-4">
         <SectionHeader
@@ -466,6 +490,15 @@ function ArchArrowDown() {
 
 function ArchSpacer() {
   return <div className="w-3" />;
+}
+
+function ComplianceCard({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="space-y-1.5">
+      <h4 className="text-xs font-semibold text-gray-200">{title}</h4>
+      <p className="text-[11px] text-bio-muted leading-relaxed">{description}</p>
+    </div>
+  );
 }
 
 function TraceExample({

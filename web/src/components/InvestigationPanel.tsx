@@ -15,9 +15,9 @@ interface Props {
 }
 
 const SAMPLE_QUESTIONS = [
-  "What are the strongest SARS-CoV-2 antibody binders in AlphaSeq, and do any have known crystal structures in SAbDab?",
-  "Find antibodies targeting coronavirus spike proteins across all databases. What do we know about their binding characteristics and structural features?",
-  "Are there any ChEMBL bioactivity measurements for compounds targeting SARS-CoV-2? Cross-reference with AlphaSeq binding data.",
+  "Compare the top-scoring antibodies against MIT_Target with the negative controls. Are the best binders statistically different, and what do their sequences have in common?",
+  "What compounds in ChEMBL have measured bioactivity against SARS-CoV-2 spike protein? Cross-reference the target biology with AlphaSeq binding data and compare measurement approaches.",
+  "Profile the full AlphaSeq dataset: how are binding scores distributed across targets, are there outliers worth investigating, and what does ChEMBL tell us about the same biological targets?",
 ];
 
 export default function InvestigationPanel({
@@ -115,24 +115,26 @@ export default function InvestigationPanel({
 
 const THINKING_MESSAGES: Record<string, string[]> = {
   research: [
-    "Profiling data sources",
-    "Mapping available entities",
-    "Scanning databases",
+    "Research agent exploring data landscape",
+    "Checking database connectivity",
+    "Profiling targets and record counts",
+    "Mapping available entities across sources",
   ],
   plan: [
-    "Designing investigation strategy",
+    "Plan agent designing investigation strategy",
     "Identifying cross-database links",
-    "Prioritising query sequence",
+    "Formulating hypothesis and query sequence",
   ],
   execute: [
-    "Analysing results",
-    "Cross-referencing findings",
+    "Execute agent running queries",
+    "Cross-referencing findings between databases",
     "Following leads across sources",
+    "Comparing metrics across databases",
   ],
   synthesize: [
-    "Compiling findings",
-    "Writing investigation report",
-    "Linking evidence to sources",
+    "Synthesis agent compiling report",
+    "Connecting evidence across sources",
+    "Writing final findings",
   ],
 };
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { TraceStep } from "../types";
 import { PHASE_META, type Phase } from "../phaseConfig";
+import Markdown from "./Markdown";
 
 interface Props {
   steps: TraceStep[];
@@ -70,7 +71,9 @@ export default function TracePanel({ steps }: Props) {
                   {/* Reasoning */}
                   <div className="px-2.5 py-1.5 border-b border-bio-border/50">
                     <div className="text-[9px] text-bio-muted uppercase tracking-wider mb-0.5">Reasoning</div>
-                    <p className="text-[11px] text-gray-400 leading-snug">{step.reasoning}</p>
+                    <div className={`text-[11px] text-gray-400 leading-snug ${step.reasoning.length > 600 ? "max-h-64 overflow-y-auto" : ""}`}>
+                      <Markdown compact>{step.reasoning}</Markdown>
+                    </div>
                   </div>
 
                   {step.tool_call && (

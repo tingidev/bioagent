@@ -1,4 +1,4 @@
-"""Agent orchestration — research → plan → execute → synthesize."""
+"""Agent orchestration — multi-agent handoffs across RPES phases."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
@@ -13,7 +14,7 @@ import anthropic
 import asyncpg
 
 from bioagent.data_map import build_data_map, describe_data_map
-from bioagent.models import AgentPhase, ToolCall, TraceEvent
+from bioagent.models import AgentPhase, Investigation, ToolCall, TraceEvent
 from bioagent.trace import (
     add_step,
     complete_investigation,
@@ -27,7 +28,10 @@ from bioagent.trace import (
 )
 from bioagent.tools import alphaseq, chembl, sabdab, statistics
 
+# ---------------------------------------------------------------------------
 # Tool definitions for Claude
+# ---------------------------------------------------------------------------
+
 TOOLS = [
     {
         "name": "query_alphaseq_bindings",
@@ -105,105 +109,208 @@ TOOLS = [
     {
         "name": "run_statistics",
         "description": (
-            "Run statistical analysis on numeric data. Compute descriptive statistics, "
-            "compare groups, or build frequency tables."
+            "Run statistical analysis on data collected from other tools. "
+            "Compute descriptive statistics, compare groups with effect size, "
+            "test correlations, detect outliers, rank items, cross-tabulate categories, "
+            "or build frequency tables. Use this to analyse data, not just summarise it."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["describe", "compare_groups", "frequency_table"],
+                    "enum": [
+                        "describe", "compare_groups", "frequency_table",
+                        "correlation", "outlier_detection", "rank_and_filter", "cross_tabulate",
+                    ],
                     "description": "The analysis to perform.",
                 },
                 "values": {
                     "type": "array",
                     "items": {"type": "number"},
-                    "description": "Numeric values for describe.",
+                    "description": "Numeric values (for describe, outlier_detection).",
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Labels for each value (for outlier_detection, rank_and_filter). E.g. sequence IDs.",
                 },
                 "group_a": {"type": "array", "items": {"type": "number"}, "description": "First group for comparison."},
                 "group_b": {"type": "array", "items": {"type": "number"}, "description": "Second group for comparison."},
                 "label_a": {"type": "string", "description": "Label for first group."},
                 "label_b": {"type": "string", "description": "Label for second group."},
+                "xs": {"type": "array", "items": {"type": "number"}, "description": "X values for correlation."},
+                "ys": {"type": "array", "items": {"type": "number"}, "description": "Y values for correlation."},
+                "top_n": {"type": "integer", "description": "Number of top items to return (for rank_and_filter, default 10)."},
+                "bottom_n": {"type": "integer", "description": "Number of bottom items to return (for rank_and_filter, default 0)."},
                 "categories": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Categorical values for frequency table.",
                 },
+                "row_categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Row categories for cross_tabulate.",
+                },
+                "col_categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Column categories for cross_tabulate.",
+                },
+                "row_label": {"type": "string", "description": "Label for row dimension in cross_tabulate."},
+                "col_label": {"type": "string", "description": "Label for column dimension in cross_tabulate."},
             },
             "required": ["action"],
         },
     },
 ]
 
-SYSTEM_PROMPT = """You are BioAgent, an investigator that reasons across scientific databases to answer research questions about antibodies, drug targets, and bioactivity.
+# ---------------------------------------------------------------------------
+# Phase-specific system prompts
+# ---------------------------------------------------------------------------
 
-You have access to three connected data sources:
+RESEARCH_PROMPT = """You are BioAgent (Research Phase). Your job is to understand the data landscape before any detailed investigation begins.
+
+You have access to these scientific databases:
 
 {data_map}
 
-## How You Work
+## Your Task
 
-You follow the RPES methodology: Research, Plan, Execute, Synthesise. Each phase builds on the previous one.
+Given the research question, explore what data is available:
 
-### 1. RESEARCH
-Before doing anything, understand the landscape. Call get_statistics and get_targets on AlphaSeq. Check which databases are reachable. Understand the shape of the data before you form a plan. Do NOT jump to detailed queries yet.
-
-End this phase by summarising what you learned: how many records, which targets exist, which sources are available.
-
-### 2. PLAN
-Write out your investigation strategy explicitly. Use the heading "## Investigation Strategy". Include:
-- Which databases you will query and in what order
-- What specific cross-references you will attempt (e.g. "I will take the top binders from AlphaSeq and search SAbDab for structures targeting the same antigen")
-- What you expect to find and what would surprise you
-- Your hypothesis: based on the research phase, what do you think the answer will be?
-
-This phase has no tool calls. It is pure reasoning.
-
-### 3. EXECUTE
-Now run your plan. For each tool call:
-- State what you are doing and why before calling the tool
-- After each result, briefly reflect: did this match your expectation? Does it change your plan?
-- When you find something in one database, explicitly use it to query another. Do not search databases in isolation.
-
-### 4. SYNTHESISE
-Produce the final report. Do not repeat raw data. Interpret, connect, and conclude.
+1. Call get_statistics and get_targets on AlphaSeq to understand the dataset shape
+2. Run a simple query on SAbDab and ChEMBL to check they are reachable and see what data they hold
+3. Note the record counts, available targets, and data types in each source
+4. Identify which sources are most relevant to the question
 
 ## Rules
 
-- Every claim must cite specific data: sequence IDs, PDB codes, ChEMBL IDs, or binding scores.
+- Only run exploratory queries (statistics, targets, basic searches). Do NOT run detailed analytical queries yet.
+- Keep it factual. Do not hypothesise or plan yet.
+
+## Output
+
+End your response with a clearly labelled section:
+
+### Research Summary
+- What data is available in each source
+- Which sources are relevant to this question
+- Any connectivity issues encountered
+- Key observations about data shape (targets, record counts, score distributions)"""
+
+PLAN_PROMPT = """You are BioAgent (Plan Phase). You receive a research summary and must design an investigation strategy. You have NO access to tools or databases.
+
+## Research Question
+
+{question}
+
+## Research Summary (from previous phase)
+
+{research_summary}
+
+## Your Task
+
+Write a concrete investigation plan. Include:
+
+1. **Hypothesis**: Based on the research summary, what do you expect to find?
+2. **Query sequence**: Which databases to query, in what order, and with what parameters. Be specific with tool names, actions, and parameter values.
+3. **Cross-references**: Specific connections to attempt between databases. For example: "Take top binders from AlphaSeq (MIT_Target), then search SAbDab for structures targeting SARS-CoV-2 spike protein, then search ChEMBL for bioactivity data against spike protein targets."
+4. **Success criteria**: What would a good answer look like? What would surprise you?
+
+Be precise. The Execute phase agent will follow your plan step by step."""
+
+EXECUTE_PROMPT = """You are BioAgent (Execute Phase). You have a research summary and an investigation plan. Your job is to execute the plan by querying databases and cross-referencing findings.
+
+You have access to these scientific databases:
+
+{data_map}
+
+## Research Question
+
+{question}
+
+## Research Summary
+
+{research_summary}
+
+## Investigation Plan (follow this)
+
+{plan}
+
+## Rules
+
+- Follow the plan step by step, but adapt if you discover something unexpected
+- Before each tool call, state what you are doing and why
+- After each result, briefly reflect: did this match your expectation? Does it change the plan?
+- When you find something in one database, use it to query another. Do NOT search databases in isolation.
+- Every claim must cite specific data: sequence IDs, PDB codes, ChEMBL IDs, or binding scores
 - State what you looked for and didn't find. Negative results matter.
-- If a database is unreachable, note it and work with what's available.
-- Keep your reasoning visible. Explain why you're querying each source.
 
 ## Cross-Referencing (Critical)
 
-Your unique value is connecting findings across databases. Do NOT just search each database independently for the same keyword. Instead:
+Your unique value is connecting findings across databases:
+- Take SPECIFIC results from one source and use them to query another
+- Compare metrics across sources: AlphaSeq binding scores vs ChEMBL IC50/Ki values measure different aspects of the same biology
+- When you find structural data in SAbDab, relate it back to binding data from AlphaSeq
+- Always state explicitly what you are cross-referencing and why
 
-- Take SPECIFIC results from one source and use them to query another. For example: find the top binders in AlphaSeq, note their target (MIT_Target = SARS-CoV-2 spike protein), then search SAbDab for structures of antibodies targeting spike protein, then search ChEMBL for compounds with bioactivity against spike protein targets.
-- Compare metrics across sources: AlphaSeq binding scores vs ChEMBL IC50/Ki values measure different aspects of the same biology. Note similarities and differences.
-- When you find structural data in SAbDab (PDB codes, CDR H3 lengths, resolution), relate it back to binding data from AlphaSeq. Do antibodies with known structures show different binding characteristics?
-- Always state explicitly what you are cross-referencing and why. "I found X in AlphaSeq. Now I will search SAbDab for Y because Z."
+## Analysis (Critical)
 
-## Adaptive Reasoning
+You are a scientist, not a librarian. Do NOT just retrieve data — analyse it:
 
-After each tool result, briefly reflect:
-- Did you find what you expected? If not, why?
-- Does this change your investigation plan? State any pivots explicitly.
-- Did you discover something unexpected worth following up?
+- After collecting binding scores, run **compare_groups** to test whether different targets/categories show statistically different binding (with effect size)
+- Use **correlation** to test relationships: do binding scores correlate with sequence features? Do CDR H3 lengths correlate with resolution?
+- Use **outlier_detection** to find exceptional antibodies or unusual measurements — these are often the most interesting findings
+- Use **rank_and_filter** to identify top performers with their identifiers
+- Use **cross_tabulate** to understand distributions across categories (e.g. species vs method, target vs binding score range)
+- State your hypothesis BEFORE running each analysis, then interpret the result: was it confirmed or refuted?
 
-For example: "I expected multiple targets in AlphaSeq but found that 40K records target MIT_Target (spike protein). This concentration is notable. Let me check whether SAbDab has structural diversity for spike-targeting antibodies, or if they converge on similar binding modes."
+Every analytical claim must be backed by a specific statistical result, not a qualitative impression.
 
-## Output Format
+## Output
 
-When you've completed your investigation, write a structured report in markdown with:
-- **Question**: what was asked
-- **Approach**: what you investigated and why
-- **Findings**: organised by theme, with specific data citations
-- **Cross-Database Connections**: insights from combining sources (this is the most important section)
-- **Limitations**: what couldn't be answered and why
-- **Reproducibility**: key queries that can be re-run independently
-"""
+End your response with a clearly labelled section:
+
+### Execution Findings
+Organised by theme, with specific data citations, statistical results, and cross-database connections noted."""
+
+SYNTHESISE_PROMPT = """You are BioAgent (Synthesise Phase). You receive the full investigation context and must write the final report. You have NO access to tools or databases.
+
+## Research Question
+
+{question}
+
+## Research Summary
+
+{research_summary}
+
+## Investigation Plan
+
+{plan}
+
+## Execution Findings
+
+{execution_findings}
+
+## Your Task
+
+Write a structured report in markdown:
+
+- **Question**: What was asked
+- **Approach**: What was investigated and why
+- **Findings**: Organised by theme, with specific data citations
+- **Cross-Database Connections**: Insights from combining sources (this is the most important section)
+- **Limitations**: What couldn't be answered and why
+- **Reproducibility**: Key queries that can be re-run independently
+
+Do not repeat raw data. Interpret, connect, and conclude. Every claim must reference specific data points from the execution findings."""
+
+
+# ---------------------------------------------------------------------------
+# Tool execution
+# ---------------------------------------------------------------------------
 
 
 async def execute_tool(
@@ -298,6 +405,30 @@ async def execute_tool(
             ), reproducible
         elif action == "frequency_table":
             return statistics.frequency_table(tool_input.get("categories", [])), reproducible
+        elif action == "correlation":
+            return statistics.correlation(
+                tool_input.get("xs", []),
+                tool_input.get("ys", []),
+            ), reproducible
+        elif action == "outlier_detection":
+            return statistics.outlier_detection(
+                tool_input.get("values", []),
+                labels=tool_input.get("labels"),
+            ), reproducible
+        elif action == "rank_and_filter":
+            return statistics.rank_and_filter(
+                tool_input.get("values", []),
+                tool_input.get("labels", []),
+                top_n=tool_input.get("top_n", 10),
+                bottom_n=tool_input.get("bottom_n", 0),
+            ), reproducible
+        elif action == "cross_tabulate":
+            return statistics.cross_tabulate(
+                tool_input.get("row_categories", []),
+                tool_input.get("col_categories", []),
+                row_label=tool_input.get("row_label", "row"),
+                col_label=tool_input.get("col_label", "col"),
+            ), reproducible
 
     return {"error": f"Unknown tool/action: {tool_name}/{tool_input.get('action')}"}, "N/A"
 
@@ -313,6 +444,11 @@ def _summarize_output(result: Any) -> str:
             return f"Stats: {json.dumps(result)}"
         return f"Returned object with keys: {', '.join(result.keys())}"
     return str(result)[:200]
+
+
+# ---------------------------------------------------------------------------
+# LLM client
+# ---------------------------------------------------------------------------
 
 
 def _create_client(
@@ -334,93 +470,114 @@ def _create_client(
     )
 
 
-async def investigate(
-    question: str,
-    pool: asyncpg.Pool | None,
-    *,
-    api_key: str | None = None,
-) -> AsyncGenerator[TraceEvent, None]:
-    """Run an investigation and yield trace events via SSE.
+async def _call_llm(client, model: str, *, system: str, messages: list[dict], tools: list | None = None):
+    """Call Claude with shared error handling. Returns response or raises."""
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": 4096,
+        "system": system,
+        "messages": messages,
+    }
+    if tools:
+        kwargs["tools"] = tools
 
-    This is the core agent loop.
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        partial(client.messages.create, **kwargs),
+    )
+
+
+def _handle_api_error(e: Exception) -> TraceEvent | None:
+    """Convert Anthropic API exceptions to error events."""
+    if isinstance(e, anthropic.AuthenticationError):
+        return error_event("API authentication failed. The API key may be invalid or expired.")
+    if isinstance(e, anthropic.RateLimitError):
+        return error_event("Rate limit reached. Please wait a moment and try again.")
+    if isinstance(e, anthropic.BadRequestError):
+        msg = e.message if hasattr(e, "message") else str(e)
+        if "credit" in msg.lower() or "billing" in msg.lower():
+            return error_event("The AI service has insufficient credits. The site administrator has been notified.")
+        return error_event(f"Invalid request to the AI model: {msg}")
+    if isinstance(e, anthropic.APIStatusError):
+        msg = e.message if hasattr(e, "message") else str(e)
+        if "credit" in msg.lower() or "billing" in msg.lower():
+            return error_event("The AI service has insufficient credits. The site administrator has been notified.")
+        if "overloaded" in msg.lower():
+            return error_event("The AI model is currently overloaded. Please try again in a few minutes.")
+        return error_event(f"AI service error ({e.status_code}): {msg}")
+    if isinstance(e, anthropic.APIConnectionError):
+        return error_event("Could not connect to the AI service. Please try again later.")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Mutable state container for phase handoffs
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _PhaseState:
+    """Mutable container passed through phase functions.
+
+    Investigation itself stays immutable (new object per add_step),
+    but we need a shared reference the orchestrator can read after each phase.
     """
-    data_map = build_data_map()
-    investigation = create_investigation(question)
+    investigation: Investigation
+    output: str = ""
 
-    # Build system prompt with data map context
-    system = SYSTEM_PROMPT.format(data_map=describe_data_map(data_map))
 
-    client, model = _create_client(api_key)
+# ---------------------------------------------------------------------------
+# Phase runners
+# ---------------------------------------------------------------------------
 
-    messages: list[dict] = [{"role": "user", "content": question}]
-    current_phase = AgentPhase.RESEARCH
 
-    yield phase_event(current_phase)
+async def _run_tool_phase(
+    *,
+    phase: AgentPhase,
+    system: str,
+    user_message: str,
+    pool: asyncpg.Pool | None,
+    client,
+    model: str,
+    state: _PhaseState,
+    max_turns: int = 25,
+) -> AsyncGenerator[TraceEvent, None]:
+    """Run a phase that has tool access (Research, Execute).
 
-    max_turns = 50
+    Yields TraceEvents as they happen. Updates state.investigation
+    and sets state.output to the agent's final text.
+    """
+    messages: list[dict] = [{"role": "user", "content": user_message}]
+
     for turn in range(max_turns):
         yield thinking_event(turn + 1)
+
         try:
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(
-                    client.messages.create,
-                    model=model,
-                    max_tokens=4096,
-                    system=system,
-                    tools=TOOLS,
-                    messages=messages,
-                ),
-            )
-        except anthropic.AuthenticationError:
-            yield error_event("API authentication failed. The API key may be invalid or expired.")
-            return
-        except anthropic.RateLimitError:
-            yield error_event("Rate limit reached. Please wait a moment and try again.")
-            return
-        except anthropic.BadRequestError as e:
-            msg = e.message if hasattr(e, "message") else str(e)
-            if "credit" in msg.lower() or "billing" in msg.lower():
-                yield error_event("The AI service has insufficient credits. The site administrator has been notified.")
+            response = await _call_llm(client, model, system=system, messages=messages, tools=TOOLS)
+        except Exception as e:
+            err = _handle_api_error(e)
+            if err:
+                yield err
             else:
-                yield error_event(f"Invalid request to the AI model: {msg}")
-            return
-        except anthropic.APIStatusError as e:
-            # Catch billing/credits errors and other status errors
-            msg = e.message if hasattr(e, "message") else str(e)
-            if "credit" in msg.lower() or "billing" in msg.lower():
-                yield error_event("The AI service has insufficient credits. The site administrator has been notified.")
-            elif "overloaded" in msg.lower():
-                yield error_event("The AI model is currently overloaded. Please try again in a few minutes.")
-            else:
-                yield error_event(f"AI service error ({e.status_code}): {msg}")
-            return
-        except anthropic.APIConnectionError:
-            yield error_event("Could not connect to the AI service. Please try again later.")
+                yield error_event(f"Unexpected error: {type(e).__name__}")
             return
 
-        # Process response content blocks
-        assistant_content = []
+        assistant_content: list[dict] = []
+        last_text = ""
+
         for block in response.content:
             if block.type == "text":
-                text = block.text
-                assistant_content.append({"type": "text", "text": text})
+                last_text = block.text
+                assistant_content.append({"type": "text", "text": block.text})
 
-                # Detect phase transitions from agent text
-                new_phase = _detect_phase(text, current_phase)
-                if new_phase and new_phase != current_phase:
-                    current_phase = new_phase
-                    yield phase_event(current_phase)
-
-                # Add reasoning step to trace
-                investigation = add_step(
-                    investigation,
-                    phase=current_phase,
+                state.investigation = add_step(
+                    state.investigation,
+                    phase=phase,
                     description=f"Agent reasoning (turn {turn + 1})",
-                    reasoning=text[:500],
+                    reasoning=block.text[:500],
                 )
-                yield step_to_event(investigation.steps[-1])
+                yield step_to_event(state.investigation.steps[-1])
 
             elif block.type == "tool_use":
                 assistant_content.append({
@@ -430,7 +587,6 @@ async def investigate(
                     "input": block.input,
                 })
 
-                # Execute the tool
                 start = time.monotonic()
                 try:
                     result, reproducible_query = await execute_tool(block.name, block.input, pool)
@@ -448,16 +604,15 @@ async def investigate(
                     reproducible_query=reproducible_query,
                 )
 
-                investigation = add_step(
-                    investigation,
-                    phase=current_phase,
+                state.investigation = add_step(
+                    state.investigation,
+                    phase=phase,
                     description=f"Tool call: {block.name}",
                     reasoning=f"Calling {block.name} with {json.dumps(block.input)[:200]}",
                     tool_call=tool_call,
                 )
-                yield step_to_event(investigation.steps[-1])
+                yield step_to_event(state.investigation.steps[-1])
 
-                # Add tool result to messages
                 messages.append({"role": "assistant", "content": assistant_content})
                 messages.append({
                     "role": "user",
@@ -469,64 +624,162 @@ async def investigate(
                 })
                 assistant_content = []
 
-        # If no tool use, add assistant message and check if done
         if response.stop_reason == "end_turn":
             if assistant_content:
                 messages.append({"role": "assistant", "content": assistant_content})
-
-            # Extract report from last text block
-            report_text = ""
-            for block in response.content:
-                if block.type == "text":
-                    report_text = block.text
-
-            investigation = complete_investigation(investigation, report_text)
-            store_investigation(investigation)
-
-            yield phase_event(AgentPhase.SYNTHESIZE)
-            yield report_event(report_text)
+            state.output = last_text
             return
 
-        # If we exhausted tool calls for this turn but aren't done, continue
         if not assistant_content:
             continue
         if response.stop_reason != "tool_use":
             messages.append({"role": "assistant", "content": assistant_content})
 
-    # Max turns reached
-    yield error_event("Investigation reached maximum number of turns. Partial results may be available.")
-    investigation = complete_investigation(investigation, "Investigation incomplete — max turns reached.")
-    store_investigation(investigation)
+    # Max turns for this phase
+    state.output = last_text
+    yield error_event(f"{phase.value.title()} phase reached maximum turns ({max_turns}).")
 
 
-_PHASE_ORDER = [AgentPhase.RESEARCH, AgentPhase.PLAN, AgentPhase.EXECUTE, AgentPhase.SYNTHESIZE]
+async def _run_reasoning_phase(
+    *,
+    phase: AgentPhase,
+    system: str,
+    user_message: str,
+    client,
+    model: str,
+    state: _PhaseState,
+) -> AsyncGenerator[TraceEvent, None]:
+    """Run a reasoning-only phase with no tools (Plan, Synthesise).
 
-
-def _phase_index(phase: AgentPhase) -> int:
-    return _PHASE_ORDER.index(phase)
-
-
-def _detect_phase(text: str, current_phase: AgentPhase) -> AgentPhase | None:
-    """Detect phase transitions from agent text.
-
-    Only allows forward transitions: research → plan → execute → synthesise.
-    Execute is only detected after plan has been reached, so research-phase
-    tool calls don't prematurely trigger execute.
+    Single LLM call. Yields TraceEvents and sets state.output.
     """
-    text_lower = text.lower()[:300]
+    yield thinking_event(1)
 
-    # Synthesise detection (always allowed)
-    if any(w in text_lower for w in ["## findings", "## report", "synthesiz", "in summary", "## question", "## investigation report", "final report"]):
-        return AgentPhase.SYNTHESIZE
+    try:
+        response = await _call_llm(client, model, system=system, messages=[{"role": "user", "content": user_message}])
+    except Exception as e:
+        err = _handle_api_error(e)
+        if err:
+            yield err
+        else:
+            yield error_event(f"Unexpected error: {type(e).__name__}")
+        return
 
-    # Plan detection (from research or plan)
-    if current_phase in (AgentPhase.RESEARCH, AgentPhase.PLAN):
-        if any(w in text_lower for w in ["let me plan", "investigation strategy", "my plan", "i'll plan", "my strategy", "here's my plan", "here is my plan"]):
-            return AgentPhase.PLAN
+    text = ""
+    for block in response.content:
+        if block.type == "text":
+            text = block.text
 
-    # Execute detection (only after plan has been reached)
-    if current_phase in (AgentPhase.PLAN, AgentPhase.EXECUTE):
-        if any(w in text_lower for w in ["let me query", "let me search", "executing", "i'll now query", "let me check", "let me now", "i'll start by querying", "let me execute", "now i'll"]):
-            return AgentPhase.EXECUTE
+    state.investigation = add_step(
+        state.investigation,
+        phase=phase,
+        description=f"{phase.value.title()} phase",
+        reasoning=text,
+    )
+    yield step_to_event(state.investigation.steps[-1])
+    state.output = text
 
-    return None
+
+# ---------------------------------------------------------------------------
+# Orchestrator — chains the 4 phases with handoffs
+# ---------------------------------------------------------------------------
+
+
+async def investigate(
+    question: str,
+    pool: asyncpg.Pool | None,
+    *,
+    api_key: str | None = None,
+) -> AsyncGenerator[TraceEvent, None]:
+    """Run a 4-phase RPES investigation with agent handoffs.
+
+    Each phase is a separate Claude conversation with a focused prompt.
+    Research and Execute have tool access; Plan and Synthesise do not.
+    Phase transitions are architectural, not keyword-detected.
+    """
+    data_map = build_data_map()
+    data_map_text = describe_data_map(data_map)
+    client, model = _create_client(api_key)
+    state = _PhaseState(investigation=create_investigation(question))
+
+    # ── Phase 1: Research ──────────────────────────────────────────────
+    yield phase_event(AgentPhase.RESEARCH)
+    async for event in _run_tool_phase(
+        phase=AgentPhase.RESEARCH,
+        system=RESEARCH_PROMPT.format(data_map=data_map_text),
+        user_message=question,
+        pool=pool,
+        client=client,
+        model=model,
+        state=state,
+        max_turns=20,
+    ):
+        yield event
+        if event.event_type == "error":
+            return
+    research_summary = state.output
+
+    # ── Phase 2: Plan ──────────────────────────────────────────────────
+    yield phase_event(AgentPhase.PLAN)
+    async for event in _run_reasoning_phase(
+        phase=AgentPhase.PLAN,
+        system=PLAN_PROMPT.format(
+            question=question,
+            research_summary=research_summary,
+        ),
+        user_message=question,
+        client=client,
+        model=model,
+        state=state,
+    ):
+        yield event
+        if event.event_type == "error":
+            return
+    plan = state.output
+
+    # ── Phase 3: Execute ───────────────────────────────────────────────
+    yield phase_event(AgentPhase.EXECUTE)
+    async for event in _run_tool_phase(
+        phase=AgentPhase.EXECUTE,
+        system=EXECUTE_PROMPT.format(
+            data_map=data_map_text,
+            question=question,
+            research_summary=research_summary,
+            plan=plan,
+        ),
+        user_message=f"Execute the investigation plan for: {question}",
+        pool=pool,
+        client=client,
+        model=model,
+        state=state,
+        max_turns=40,
+    ):
+        yield event
+        if event.event_type == "error":
+            return
+    execution_findings = state.output
+
+    # ── Phase 4: Synthesise ────────────────────────────────────────────
+    yield phase_event(AgentPhase.SYNTHESIZE)
+    async for event in _run_reasoning_phase(
+        phase=AgentPhase.SYNTHESIZE,
+        system=SYNTHESISE_PROMPT.format(
+            question=question,
+            research_summary=research_summary,
+            plan=plan,
+            execution_findings=execution_findings,
+        ),
+        user_message=f"Write the final investigation report for: {question}",
+        client=client,
+        model=model,
+        state=state,
+    ):
+        yield event
+        if event.event_type == "error":
+            return
+    report_text = state.output
+
+    # ── Done ───────────────────────────────────────────────────────────
+    state.investigation = complete_investigation(state.investigation, report_text)
+    store_investigation(state.investigation)
+    yield report_event(report_text)

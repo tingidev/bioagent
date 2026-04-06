@@ -75,7 +75,10 @@ export default function PhasePipeline({ currentPhase, isInvestigating, steps }: 
                   )}
                   {isActive && count === 0 && (
                     <div className="text-[10px] text-bio-muted animate-pulse">
-                      Working...
+                      {phase === "research" ? "Exploring sources..." :
+                       phase === "plan" ? "Designing strategy..." :
+                       phase === "execute" ? "Running queries..." :
+                       "Writing report..."}
                     </div>
                   )}
                 </div>
