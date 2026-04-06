@@ -61,6 +61,7 @@ export default function App() {
       (event: TraceEvent) => {
         if (event.event_type === "thinking") {
           setIsThinking(true);
+          setError(null);
         } else if (event.event_type === "phase_change" && event.data.phase) {
           setIsThinking(false);
           setCurrentPhase(event.data.phase);
@@ -78,6 +79,9 @@ export default function App() {
         } else if (event.event_type === "report" && event.data.report) {
           setIsThinking(false);
           setReport(event.data.report);
+        } else if (event.event_type === "retry") {
+          setIsThinking(true);
+          setError(`Rate limited — retrying in ${event.data.wait_seconds}s (attempt ${event.data.attempt}/3)`);
         } else if (event.event_type === "error" && event.data.message) {
           setIsThinking(false);
           setError(event.data.message);

@@ -47,6 +47,8 @@ export interface TraceEvent {
     report?: string;
     message?: string;
     turn?: number;
+    attempt?: number;
+    wait_seconds?: number;
   };
 }
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
@@ -472,8 +472,20 @@ def _create_client(
     )
 
 
-async def _call_llm(client, model: str, *, system: str, messages: list[dict], tools: list | None = None):
-    """Call Claude with shared error handling. Returns response or raises."""
+async def _call_llm(
+    client,
+    model: str,
+    *,
+    system: str,
+    messages: list[dict],
+    tools: list | None = None,
+    on_retry: Callable[[int, int], None] | None = None,
+):
+    """Call Claude with retry on rate limit (3 attempts, exponential backoff).
+
+    on_retry(attempt, wait_seconds) is called before each retry sleep,
+    so callers can notify the user.
+    """
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": 4096,
@@ -484,10 +496,20 @@ async def _call_llm(client, model: str, *, system: str, messages: list[dict], to
         kwargs["tools"] = tools
 
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None,
-        partial(client.messages.create, **kwargs),
-    )
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            return await loop.run_in_executor(
+                None,
+                partial(client.messages.create, **kwargs),
+            )
+        except anthropic.RateLimitError as e:
+            last_err = e
+            wait = 2 ** attempt * 5  # 5s, 10s, 20s
+            if on_retry:
+                on_retry(attempt + 1, wait)
+            await asyncio.sleep(wait)
+    raise last_err  # type: ignore[misc]
 
 
 def _handle_api_error(e: Exception) -> TraceEvent | None:
@@ -555,8 +577,18 @@ async def _run_tool_phase(
     for turn in range(max_turns):
         yield thinking_event(turn + 1)
 
+        retry_events: list[TraceEvent] = []
+
+        def _on_retry(attempt: int, wait: int) -> None:
+            retry_events.append(
+                thinking_event(0)  # keep spinner alive
+            )
+            retry_events.append(
+                TraceEvent(event_type="retry", data={"attempt": attempt, "wait_seconds": wait})
+            )
+
         try:
-            response = await _call_llm(client, model, system=system, messages=messages, tools=TOOLS)
+            response = await _call_llm(client, model, system=system, messages=messages, tools=TOOLS, on_retry=_on_retry)
         except Exception as e:
             err = _handle_api_error(e)
             if err:
@@ -564,6 +596,9 @@ async def _run_tool_phase(
             else:
                 yield error_event(f"Unexpected error: {type(e).__name__}")
             return
+        finally:
+            for evt in retry_events:
+                yield evt
 
         assistant_content: list[dict] = []
         last_text = ""
@@ -657,8 +692,15 @@ async def _run_reasoning_phase(
     """
     yield thinking_event(1)
 
+    retry_events: list[TraceEvent] = []
+
+    def _on_retry(attempt: int, wait: int) -> None:
+        retry_events.append(
+            TraceEvent(event_type="retry", data={"attempt": attempt, "wait_seconds": wait})
+        )
+
     try:
-        response = await _call_llm(client, model, system=system, messages=[{"role": "user", "content": user_message}])
+        response = await _call_llm(client, model, system=system, messages=[{"role": "user", "content": user_message}], on_retry=_on_retry)
     except Exception as e:
         err = _handle_api_error(e)
         if err:
@@ -666,6 +708,9 @@ async def _run_reasoning_phase(
         else:
             yield error_event(f"Unexpected error: {type(e).__name__}")
         return
+    finally:
+        for evt in retry_events:
+            yield evt
 
     text = ""
     for block in response.content:
