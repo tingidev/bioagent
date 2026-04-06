@@ -278,12 +278,30 @@ def _summarize_output(result: Any) -> str:
     return str(result)[:200]
 
 
+def _create_client(
+    api_key: str | None = None,
+) -> tuple[anthropic.Anthropic | anthropic.AnthropicBedrock, str]:
+    """Create an Anthropic client. Returns (client, model_id).
+
+    Priority: explicit api_key > ANTHROPIC_API_KEY env var > Bedrock (AWS creds).
+    """
+    import os
+
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return anthropic.Anthropic(api_key=key), "claude-sonnet-4-20250514"
+
+    return (
+        anthropic.AnthropicBedrock(aws_region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1")),
+        "us.anthropic.claude-sonnet-4-20250514-v1:0",
+    )
+
+
 async def investigate(
     question: str,
     pool: asyncpg.Pool | None,
     *,
-    model: str = "us.anthropic.claude-sonnet-4-20250514-v1:0",
-    region: str = "us-east-1",
+    api_key: str | None = None,
 ) -> AsyncGenerator[TraceEvent, None]:
     """Run an investigation and yield trace events via SSE.
 
@@ -295,8 +313,7 @@ async def investigate(
     # Build system prompt with data map context
     system = SYSTEM_PROMPT.format(data_map=describe_data_map(data_map))
 
-    # Initialize Bedrock client — uses AWS env vars from assume
-    client = anthropic.AnthropicBedrock(aws_region=region)
+    client, model = _create_client(api_key)
 
     messages: list[dict] = [{"role": "user", "content": question}]
     current_phase = AgentPhase.RESEARCH

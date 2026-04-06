@@ -167,7 +167,7 @@ export default function HowItWorksPanel() {
           title="Architecture"
           subtitle="Python/FastAPI backend, React frontend, real-time streaming."
         />
-        <div className="space-y-4">
+        <div className="bg-bio-card border border-bio-border rounded-xl p-6 space-y-4">
           {/* Top row: Frontend ↔ API */}
           <div className="flex items-stretch gap-0">
             <ArchBox label="Frontend" accent>

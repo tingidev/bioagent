@@ -136,6 +136,7 @@ class Investigation(BaseModel, frozen=True):
 
 class InvestigationRequest(BaseModel, frozen=True):
     question: str
+    api_key: str | None = None
 
 
 # --- API Response Models ---

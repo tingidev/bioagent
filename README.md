@@ -23,10 +23,13 @@ The agent builds a **data map** of connected sources, takes a research question,
 ## Quick Start
 
 ```bash
+# Set your Anthropic API key
+export ANTHROPIC_API_KEY=sk-ant-...
+
 # Start everything
 docker compose up -d
 
-# Load AlphaSeq data
+# Load AlphaSeq data (first time only)
 docker compose run --rm ingest
 
 # Open the UI
@@ -40,12 +43,15 @@ open http://localhost:3000
 docker compose up -d db
 
 # Backend
+export ANTHROPIC_API_KEY=sk-ant-...
 pip install -e ".[dev]"
 PYTHONPATH=src uvicorn bioagent.api:app --reload --port 8000
 
 # Frontend
 cd web && npm install && npm run dev
 ```
+
+> **LLM Provider:** The agent uses Claude Sonnet 4. Set `ANTHROPIC_API_KEY` for the direct API (recommended), or provide AWS credentials for Bedrock as an alternative.
 
 ## Tech Stack
 

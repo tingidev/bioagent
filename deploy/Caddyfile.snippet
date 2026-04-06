@@ -1,0 +1,6 @@
+# Add this to the existing Caddyfile on the Hetzner server
+# (alongside the datavoorelkaar.nl entries)
+
+bioagent.eu, www.bioagent.eu {
+    reverse_proxy localhost:3001
+}

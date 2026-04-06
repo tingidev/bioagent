@@ -86,7 +86,7 @@ async def data_map():
 async def start_investigation(request: InvestigationRequest):
     """Start an investigation — streams trace events via SSE."""
     async def event_stream() -> AsyncGenerator[dict, None]:
-        async for event in investigate(request.question, _pool):
+        async for event in investigate(request.question, _pool, api_key=request.api_key):
             yield {
                 "event": event.event_type,
                 "data": event.model_dump_json(),

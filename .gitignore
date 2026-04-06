@@ -16,6 +16,7 @@ data/*.parquet
 # Environment
 .env
 .env.local
+**/.env
 
 # IDE
 .idea/

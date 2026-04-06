@@ -1,6 +1,6 @@
 import type { DataMapResponse, HealthResponse, TraceEvent } from "./types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? "/api" : "http://localhost:8000");
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
