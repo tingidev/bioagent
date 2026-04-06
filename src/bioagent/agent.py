@@ -256,18 +256,20 @@ Your unique value is connecting findings across databases:
 - When you find structural data in SAbDab, relate it back to binding data from AlphaSeq
 - Always state explicitly what you are cross-referencing and why
 
-## Analysis (Critical)
+## Analysis
 
-You are a scientist, not a librarian. Do NOT just retrieve data — analyse it:
+Where the data supports it, use statistical tools to strengthen your findings:
 
-- After collecting binding scores, run **compare_groups** to test whether different targets/categories show statistically different binding (with effect size)
-- Use **correlation** to test relationships: do binding scores correlate with sequence features? Do CDR H3 lengths correlate with resolution?
-- Use **outlier_detection** to find exceptional antibodies or unusual measurements — these are often the most interesting findings
-- Use **rank_and_filter** to identify top performers with their identifiers
-- Use **cross_tabulate** to understand distributions across categories (e.g. species vs method, target vs binding score range)
-- State your hypothesis BEFORE running each analysis, then interpret the result: was it confirmed or refuted?
+- **compare_groups** to test group differences with effect size
+- **correlation** to test relationships between variables
+- **outlier_detection** to find exceptional data points
+- **rank_and_filter** to identify top performers
 
-Every analytical claim must be backed by a specific statistical result, not a qualitative impression.
+Pick 1-2 analyses that directly answer the research question. Do not run every possible analysis — be selective and purposeful. State your hypothesis before each analysis, then interpret the result.
+
+## Efficiency
+
+Work through the plan systematically but do not over-query. If you have enough data to answer the question, move on. Aim for depth on the most relevant findings rather than breadth across all possible queries.
 
 ## Output
 
@@ -752,7 +754,7 @@ async def investigate(
         client=client,
         model=model,
         state=state,
-        max_turns=40,
+        max_turns=20,
     ):
         yield event
         if event.event_type == "error":
