@@ -52,7 +52,7 @@ TOOLS = [
                 "max_score": {"type": "number", "description": "Maximum binding score (for search_by_score)."},
                 "target": {"type": "string", "description": "Target name to filter by."},
                 "sequence_fragment": {"type": "string", "description": "Amino acid sequence fragment to search for."},
-                "limit": {"type": "integer", "description": "Max results to return (default 50)."},
+                "limit": {"type": "integer", "description": "Max results to return (default 20)."},
             },
             "required": ["action"],
         },
@@ -325,7 +325,7 @@ async def execute_tool(
         if pool is None:
             return {"error": "AlphaSeq database not connected"}, "N/A"
         action = tool_input["action"]
-        limit = tool_input.get("limit", 50)
+        limit = tool_input.get("limit", 20)
         target = tool_input.get("target")
 
         if action == "search_by_score":
@@ -446,6 +446,40 @@ def _summarize_output(result: Any) -> str:
             return f"Stats: {json.dumps(result)}"
         return f"Returned object with keys: {', '.join(result.keys())}"
     return str(result)[:200]
+
+
+def _truncate_value(val: Any, max_len: int = 40) -> Any:
+    """Truncate long string values (e.g. amino acid sequences)."""
+    if isinstance(val, str) and len(val) > max_len:
+        return val[:max_len] + "..."
+    return val
+
+
+def _compact_record(record: dict) -> dict:
+    """Compact a single record by truncating long string values."""
+    return {k: _truncate_value(v) for k, v in record.items()}
+
+
+def _compact_for_context(result: Any, max_items: int = 10) -> str:
+    """Create a compact JSON representation of tool results for the LLM context.
+
+    Full results are kept in the audit trail (ToolCall.raw_output).
+    This version goes into the conversation to keep context lean.
+    """
+    if isinstance(result, list):
+        compacted = [_compact_record(r) if isinstance(r, dict) else r for r in result[:max_items]]
+        if len(result) > max_items:
+            compacted.append({"_note": f"... and {len(result) - max_items} more results (total: {len(result)})"})
+        text = json.dumps(compacted, default=str)
+    elif isinstance(result, dict):
+        text = json.dumps(_compact_record(result), default=str)
+    else:
+        text = str(result)
+
+    # Hard cap — should rarely hit this after compaction
+    if len(text) > 4000:
+        return text[:3900] + f'\n... [truncated, {len(text)} chars total]'
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -656,7 +690,7 @@ async def _run_tool_phase(
                     "content": [{
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": json.dumps(result, default=str)[:10000],
+                        "content": _compact_for_context(result),
                     }],
                 })
                 assistant_content = []
