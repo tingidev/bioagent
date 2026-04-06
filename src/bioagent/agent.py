@@ -144,16 +144,33 @@ You have access to three connected data sources:
 
 ## How You Work
 
-You MUST follow these four phases in strict order. Never skip a phase.
+You follow the RPES methodology: Research, Plan, Execute, Synthesise. Each phase builds on the previous one.
 
-1. **RESEARCH**: Understand the question. Identify which data sources are relevant. Profile what data is available before diving in. Use tool calls to check connectivity and get statistics.
-2. **PLAN**: Before executing any detailed queries, write out your investigation strategy. State: which databases you will query, in what order, what you expect to find, and how you will cross-reference results. Begin this section with "## Investigation Strategy" or "Let me plan". Do NOT skip this phase.
-3. **EXECUTE**: Now run queries across databases. Cross-reference findings. Follow leads from one source to another.
-4. **SYNTHESIZE**: Produce a structured report with findings, citations to actual data, and reproducible queries.
+### 1. RESEARCH
+Before doing anything, understand the landscape. Call get_statistics and get_targets on AlphaSeq. Check which databases are reachable. Understand the shape of the data before you form a plan. Do NOT jump to detailed queries yet.
+
+End this phase by summarising what you learned: how many records, which targets exist, which sources are available.
+
+### 2. PLAN
+Write out your investigation strategy explicitly. Use the heading "## Investigation Strategy". Include:
+- Which databases you will query and in what order
+- What specific cross-references you will attempt (e.g. "I will take the top binders from AlphaSeq and search SAbDab for structures targeting the same antigen")
+- What you expect to find and what would surprise you
+- Your hypothesis: based on the research phase, what do you think the answer will be?
+
+This phase has no tool calls. It is pure reasoning.
+
+### 3. EXECUTE
+Now run your plan. For each tool call:
+- State what you are doing and why before calling the tool
+- After each result, briefly reflect: did this match your expectation? Does it change your plan?
+- When you find something in one database, explicitly use it to query another. Do not search databases in isolation.
+
+### 4. SYNTHESISE
+Produce the final report. Do not repeat raw data. Interpret, connect, and conclude.
 
 ## Rules
 
-- You MUST complete RESEARCH and PLAN before making any EXECUTE queries. No exceptions.
 - Every claim must cite specific data: sequence IDs, PDB codes, ChEMBL IDs, or binding scores.
 - State what you looked for and didn't find. Negative results matter.
 - If a database is unreachable, note it and work with what's available.
@@ -391,7 +408,7 @@ async def investigate(
                 assistant_content.append({"type": "text", "text": text})
 
                 # Detect phase transitions from agent text
-                new_phase = _detect_phase(text)
+                new_phase = _detect_phase(text, current_phase)
                 if new_phase and new_phase != current_phase:
                     current_phase = new_phase
                     yield phase_event(current_phase)
@@ -482,13 +499,34 @@ async def investigate(
     store_investigation(investigation)
 
 
-def _detect_phase(text: str) -> AgentPhase | None:
-    """Detect phase transitions from agent text."""
-    text_lower = text.lower()[:200]
-    if any(w in text_lower for w in ["let me plan", "investigation strategy", "my plan", "i'll plan"]):
-        return AgentPhase.PLAN
-    if any(w in text_lower for w in ["let me query", "let me search", "executing", "i'll now query", "let me check"]):
-        return AgentPhase.EXECUTE
-    if any(w in text_lower for w in ["## findings", "## report", "synthesiz", "in summary", "## question"]):
+_PHASE_ORDER = [AgentPhase.RESEARCH, AgentPhase.PLAN, AgentPhase.EXECUTE, AgentPhase.SYNTHESIZE]
+
+
+def _phase_index(phase: AgentPhase) -> int:
+    return _PHASE_ORDER.index(phase)
+
+
+def _detect_phase(text: str, current_phase: AgentPhase) -> AgentPhase | None:
+    """Detect phase transitions from agent text.
+
+    Only allows forward transitions: research → plan → execute → synthesise.
+    Execute is only detected after plan has been reached, so research-phase
+    tool calls don't prematurely trigger execute.
+    """
+    text_lower = text.lower()[:300]
+
+    # Synthesise detection (always allowed)
+    if any(w in text_lower for w in ["## findings", "## report", "synthesiz", "in summary", "## question", "## investigation report", "final report"]):
         return AgentPhase.SYNTHESIZE
+
+    # Plan detection (from research or plan)
+    if current_phase in (AgentPhase.RESEARCH, AgentPhase.PLAN):
+        if any(w in text_lower for w in ["let me plan", "investigation strategy", "my plan", "i'll plan", "my strategy", "here's my plan", "here is my plan"]):
+            return AgentPhase.PLAN
+
+    # Execute detection (only after plan has been reached)
+    if current_phase in (AgentPhase.PLAN, AgentPhase.EXECUTE):
+        if any(w in text_lower for w in ["let me query", "let me search", "executing", "i'll now query", "let me check", "let me now", "i'll start by querying", "let me execute", "now i'll"]):
+            return AgentPhase.EXECUTE
+
     return None

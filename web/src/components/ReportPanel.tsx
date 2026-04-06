@@ -28,6 +28,7 @@ export default function ReportPanel({ report, steps, question }: Props) {
             </p>
           </div>
           <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-bio-muted">Download:</span>
             <ExportButton label=".md" onClick={() => exportMarkdown(report, steps, question)} />
             <ExportButton label=".docx" onClick={() => exportDocx(report, steps, question)} />
           </div>
