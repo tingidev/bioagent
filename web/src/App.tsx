@@ -2,11 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import type { DataMapResponse, HealthResponse, TraceEvent, TraceStep } from "./types";
 import { fetchDataMap, fetchHealth, subscribeInvestigation } from "./api";
 import DataMapPanel from "./components/DataMapPanel";
+import HowItWorksPanel from "./components/HowItWorksPanel";
 import InvestigationPanel from "./components/InvestigationPanel";
 import TracePanel from "./components/TracePanel";
 import ReportPanel from "./components/ReportPanel";
 
+type View = "investigate" | "how-it-works";
+
 export default function App() {
+  const [view, setView] = useState<View>("how-it-works");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [dataMap, setDataMap] = useState<DataMapResponse | null>(null);
   const [question, setQuestion] = useState("");
@@ -66,7 +70,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="border-b border-bio-border px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-bio-border px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-bio-accent/20 flex items-center justify-center">
             <span className="text-bio-accent font-bold text-sm">B</span>
@@ -74,12 +78,28 @@ export default function App() {
           <h1 className="text-lg font-semibold text-gray-100">
             BioAgent
           </h1>
-          <span className="text-bio-muted text-sm">Antibody Investigator</span>
         </div>
+
+        {/* Tabs */}
+        <nav className="flex items-center gap-1">
+          <TabButton
+            active={view === "how-it-works"}
+            onClick={() => setView("how-it-works")}
+          >
+            How It Works
+          </TabButton>
+          <TabButton
+            active={view === "investigate"}
+            onClick={() => setView("investigate")}
+          >
+            Investigate
+          </TabButton>
+        </nav>
+
         <div className="flex items-center gap-4 text-sm">
           {health && (
             <span className={health.status === "ok" ? "text-bio-accent" : "text-yellow-400"}>
-              {sourceCount}/3 sources connected
+              {sourceCount}/3 sources
             </span>
           )}
           {currentPhase && isInvestigating && (
@@ -90,34 +110,66 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left sidebar — Data Map */}
-        <aside className="w-80 border-r border-bio-border overflow-y-auto p-4">
-          <DataMapPanel dataMap={dataMap} health={health} />
-        </aside>
+      {/* View: How It Works */}
+      {view === "how-it-works" && (
+        <HowItWorksPanel />
+      )}
 
-        {/* Center — Investigation + Report */}
-        <main className="flex-1 flex flex-col overflow-hidden">
-          <InvestigationPanel
-            question={question}
-            onQuestionChange={setQuestion}
-            onInvestigate={handleInvestigate}
-            isInvestigating={isInvestigating}
-            currentPhase={currentPhase}
-            steps={steps}
-            error={error}
-          />
-          {report && <ReportPanel report={report} />}
-        </main>
-      </div>
+      {/* View: Investigate */}
+      {view === "investigate" && (
+        <>
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left sidebar — Data Map */}
+            <aside className="w-80 border-r border-bio-border overflow-y-auto p-4">
+              <DataMapPanel dataMap={dataMap} health={health} />
+            </aside>
 
-      {/* Bottom — Audit Trail */}
-      {steps.length > 0 && (
-        <div className="border-t border-bio-border max-h-64 overflow-y-auto">
-          <TracePanel steps={steps} />
-        </div>
+            {/* Center — Investigation + Report */}
+            <main className="flex-1 flex flex-col overflow-hidden">
+              <InvestigationPanel
+                question={question}
+                onQuestionChange={setQuestion}
+                onInvestigate={handleInvestigate}
+                isInvestigating={isInvestigating}
+                currentPhase={currentPhase}
+                steps={steps}
+                error={error}
+              />
+              {report && <ReportPanel report={report} />}
+            </main>
+          </div>
+
+          {/* Bottom — Audit Trail */}
+          {steps.length > 0 && (
+            <div className="border-t border-bio-border max-h-64 overflow-y-auto">
+              <TracePanel steps={steps} />
+            </div>
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+        active
+          ? "bg-bio-accent/15 text-bio-accent"
+          : "text-bio-muted hover:text-gray-300"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
