@@ -26,7 +26,7 @@ ssh -i $SSH_KEY $SERVER << 'EOF'
     # First-time setup: clone if not present
     if [ ! -d /opt/bioagent ]; then
         echo "=== First-time setup: cloning repo ==="
-        git clone https://github.com/tingidev/bioagent.git /opt/bioagent
+        git clone https://github.com/joerivwijn/bioagent.git /opt/bioagent
     fi
 
     cd /opt/bioagent
