@@ -346,7 +346,11 @@ async def investigate(
             yield error_event("Rate limit reached. Please wait a moment and try again.")
             return
         except anthropic.BadRequestError as e:
-            yield error_event(f"Invalid request to the AI model: {e.message}")
+            msg = e.message if hasattr(e, "message") else str(e)
+            if "credit" in msg.lower() or "billing" in msg.lower():
+                yield error_event("The AI service has insufficient credits. The site administrator has been notified.")
+            else:
+                yield error_event(f"Invalid request to the AI model: {msg}")
             return
         except anthropic.APIStatusError as e:
             # Catch billing/credits errors and other status errors

@@ -9,7 +9,7 @@ export default function HowItWorksPanel() {
         <p className="text-bio-muted text-sm max-w-2xl mx-auto leading-relaxed">
           BioAgent connects to real scientific data sources, builds a navigable
           map of what's available, and reasons across them to answer research
-          questions — with every step traced and every finding reproducible.
+          questions, with every step traced and every finding reproducible.
         </p>
       </section>
 
@@ -104,7 +104,7 @@ export default function HowItWorksPanel() {
             number={2}
             name="Plan"
             description="Describe the investigation strategy. Which databases to query, in what order, and what to expect. Make the reasoning visible."
-            example="'Top binders are against MIT_Target — I'll search ChEMBL for SARS-CoV-2 spike protein targets.'"
+            example="'Top binders are against MIT_Target. I'll search ChEMBL for SARS-CoV-2 spike protein targets next.'"
           />
           <PhaseCard
             number={3}
@@ -197,7 +197,7 @@ export default function HowItWorksPanel() {
                 Agent Loop
               </span>
               <div className="mt-1 space-y-0.5 text-xs text-bio-muted">
-                <p>Claude (LLM) via Bedrock</p>
+                <p>Claude (LLM) via Anthropic API</p>
                 <p>Phase management</p>
                 <p>Trace capture</p>
               </div>
@@ -241,7 +241,7 @@ export default function HowItWorksPanel() {
             "FastAPI",
             "asyncpg",
             "httpx",
-            "Claude (Bedrock)",
+            "Claude (Anthropic API)",
             "PostgreSQL 16",
             "React 19",
             "TypeScript",

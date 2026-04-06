@@ -122,10 +122,10 @@ const THINKING_MESSAGES: Record<string, string[]> = {
   plan: [
     "Designing investigation strategy",
     "Identifying cross-database links",
-    "Prioritizing query sequence",
+    "Prioritising query sequence",
   ],
   execute: [
-    "Analyzing results",
+    "Analysing results",
     "Cross-referencing findings",
     "Following leads across sources",
   ],

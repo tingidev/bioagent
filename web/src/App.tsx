@@ -131,7 +131,7 @@ export default function App() {
                     <span className="absolute top-full right-0 mt-1.5 px-2.5 py-1.5 rounded bg-bio-card border border-bio-border text-[11px] whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-lg">
                       {ok
                         ? <span className="text-bio-accent">Connected</span>
-                        : <><span className="text-yellow-500">Unavailable</span><span className="text-gray-400"> — agent will use remaining sources</span></>
+                        : <><span className="text-yellow-500">Unavailable</span><span className="text-gray-400"> &ndash; agent will use remaining sources</span></>
                       }
                     </span>
                   </span>
