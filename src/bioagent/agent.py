@@ -269,7 +269,12 @@ Pick 1-2 analyses that directly answer the research question. Do not run every p
 
 ## Efficiency
 
-Work through the plan systematically but do not over-query. If you have enough data to answer the question, move on. Aim for depth on the most relevant findings rather than breadth across all possible queries.
+Aim for **8-12 tool calls total**. Budget roughly:
+- 4-6 data retrieval queries (the essential ones from the plan)
+- 2-3 cross-referencing queries
+- 1-2 statistical analyses
+
+When you have enough data to answer the question, STOP and write your findings. Not every result needs a follow-up query — a focused answer with strong cross-references is better than an exhaustive survey of every data point.
 
 ## Output
 
@@ -845,7 +850,7 @@ async def investigate(
         client=client,
         model=model,
         state=state,
-        max_turns=20,
+        max_turns=15,
     ):
         yield event
         if event.event_type == "error":
