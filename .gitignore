@@ -31,5 +31,8 @@ Thumbs.db
 web/node_modules/
 web/dist/
 
+# Private
+LEARNINGS.md
+
 # Docker
 *.log
